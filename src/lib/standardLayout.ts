@@ -320,7 +320,7 @@ export function setFlexibleBayWidth(
       if (otherWidths[i] >= minFlexibleWidth) continue;
       const deficit = minFlexibleWidth - otherWidths[i];
       otherWidths[i] = minFlexibleWidth;
-      let donor = otherWidths
+      const donor = otherWidths
         .map((width, index) => ({ width, index }))
         .filter((item) => item.index !== i)
         .sort((a, b) => b.width - a.width)[0];

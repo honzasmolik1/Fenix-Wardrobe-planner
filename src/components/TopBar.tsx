@@ -84,7 +84,7 @@ export function TopBar() {
 
   useEffect(() => {
     setBayWidthDraft(selectedBay ? String(selectedBay.width) : "");
-  }, [selectedBay?.id, selectedBay?.width]);
+  }, [selectedBay]);
 
   const commitWidth = () => {
     const parsed = Number(widthDraft);
