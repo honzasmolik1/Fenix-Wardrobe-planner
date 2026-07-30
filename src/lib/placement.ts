@@ -164,9 +164,10 @@ function evenShelfPositions(
     );
   }
 
+  // Equal air gaps: above first, between, and below last (to drawers / floor)
   const gap = (spanHeight - totalShelfHeight) / (count + 1);
   return Array.from({ length: count }, (_, index) =>
-    Math.round(span.start + gap + index * (shelfHeight + gap)),
+    Math.round(span.start + gap * (index + 1) + shelfHeight * index),
   );
 }
 
@@ -274,7 +275,7 @@ function shelfYsAroundRail(
 
   const drawers = otherObstacles.filter((mod) => mod.type === "drawer-pack");
   const zoneBottom = drawers.reduce(
-    (min, drawer) => Math.min(min, drawer.y - MODULE_CLEARANCE_MM),
+    (min, drawer) => Math.min(min, drawer.y),
     wardrobeHeight,
   );
 
@@ -390,24 +391,24 @@ export function redistributeShelvesEvenly(
       otherObstacles,
     );
   } else {
-    const free = freeSpansInMainZone(obstacles, wardrobeHeight, carcassHeight, {
-      reserveJacketSpace: true,
-    })
-      .filter((span) => fitsInSpan(span, shelfHeight))
-      .sort((a, b) => b.end - b.start - (a.end - a.start));
-
-    const span = shelfPlacementSpan(
-      free,
-      obstacles,
-      shelves.length,
-      shelfHeight,
-    );
-    if (!span) return modules;
+    // Pocket from construction underside to the top face of drawers / floor.
+    // Do not subtract MODULE_CLEARANCE here — that made the bottom air gap
+    // look ~32 mm larger than the gaps between shelves.
+    const zoneTop = mainZoneTop(wardrobeHeight, carcassHeight);
+    let zoneBottom = wardrobeHeight;
+    for (const obs of obstacles) {
+      if (obs.y + obs.height <= zoneTop) continue;
+      if (obs.y < zoneBottom) zoneBottom = obs.y;
+    }
+    const span: Span = {
+      start: zoneTop,
+      end: Math.max(zoneTop, zoneBottom),
+    };
 
     const count = shelves.length;
     const placeCount = canFitShelves(span, count, shelfHeight)
       ? count
-      : Math.max(1, Math.floor((span.end - span.start) / shelfHeight));
+      : Math.max(1, Math.floor((span.end - span.start) / Math.max(shelfHeight, 1)));
 
     if (options.forceEven) {
       positions = evenShelfPositions(span, placeCount, shelfHeight);

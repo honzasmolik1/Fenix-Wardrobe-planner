@@ -19,11 +19,11 @@ function evenShelfYs(
   shelfHeight: number,
 ): number[] {
   if (count <= 0) return [];
-  const span = Math.max(shelfHeight * count, zoneBottom - zoneTop);
+  const spanHeight = Math.max(shelfHeight * count, zoneBottom - zoneTop);
   const totalShelf = count * shelfHeight;
-  const gap = (span - totalShelf) / (count + 1);
+  const gap = (spanHeight - totalShelf) / (count + 1);
   return Array.from({ length: count }, (_, index) =>
-    Math.round(zoneTop + gap + index * (shelfHeight + gap)),
+    Math.round(zoneTop + gap * (index + 1) + shelfHeight * index),
   );
 }
 
@@ -86,7 +86,7 @@ export function createStandardModules(
   const midRailY = topRailY + railH + 1000;
 
   // Bay 3: shelves in the pocket above the drawer pack (still under construction)
-  const shelfZoneBottom = Math.max(zoneTop + shelfH * 2 + 64, drawerY - 32);
+  const shelfZoneBottom = Math.max(zoneTop + shelfH * 2 + 64, drawerY);
   const bay3ShelfYs = evenShelfYs(2, zoneTop, shelfZoneBottom, shelfH);
 
   const modules: Module[] = [];
