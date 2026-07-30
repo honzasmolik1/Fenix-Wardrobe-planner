@@ -1,0 +1,741 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Circle, Group, Layer, Line, Rect, Stage, Text } from "react-konva";
+import type Konva from "konva";
+import {
+  CONSTRUCTION_SHELF_HEIGHT_MM,
+  MIN_CARCASS_HEIGHT_MM,
+  MIN_TOP_BOX_MM,
+  SNAP_INCREMENT_MM,
+  constructionShelfY,
+} from "@/lib/constants";
+import {
+  type Module,
+  type ModuleType,
+  useWardrobeStore,
+} from "@/store/store";
+
+/** Space around the carcass for dimension labels (px at 1:1 before scale) */
+const DIM_LEFT = 72;
+const DIM_RIGHT = 20;
+const DIM_TOP = 18;
+const DIM_BOTTOM = 52;
+/** Extra margin so the drawing sits a bit off the screen/PDF edges */
+const EDGE_GAP = 12;
+/** Visual carcass board thickness in mm (drawn outside the interior) */
+const BOARD_THICKNESS_MM = 22;
+const DIVIDER_STROKE = 5;
+const FRAME_COLOR = "#0a0a0a";
+const BEVEL_LIGHT = "rgba(255, 255, 255, 0.22)";
+const BEVEL_DARK = "rgba(0, 0, 0, 0.35)";
+
+const MODULE_FILL: Record<ModuleType, string> = {
+  shelf: "#3f6f64",
+  "drawer-pack": "#8d6b45",
+  "hanging-rail": "#5b6472",
+};
+
+const MODULE_STROKE: Record<ModuleType, string> = {
+  shelf: "#2f564d",
+  "drawer-pack": "#6f5234",
+  "hanging-rail": "#3f4654",
+};
+
+function getBayOriginX(bays: { width: number }[], bayIndex: number): number {
+  return bays.slice(0, bayIndex).reduce((sum, bay) => sum + bay.width, 0);
+}
+
+interface ModuleShapeProps {
+  mod: Module;
+  bayWidthPx: number;
+  scale: number;
+  wardrobeHeight: number;
+  selected: boolean;
+  onSelect: (moduleId: string) => void;
+  onDragEnd: (moduleId: string, yMm: number) => void;
+}
+
+function ModuleShape({
+  mod,
+  bayWidthPx,
+  scale,
+  wardrobeHeight,
+  selected,
+  onSelect,
+  onDragEnd,
+}: ModuleShapeProps) {
+  const groupRef = useRef<Konva.Group>(null);
+  const draggingRef = useRef(false);
+  const inset = Math.max(8, 10 * scale);
+  const heightPx = Math.max(mod.height * scale, 3);
+  const widthPx = Math.max(bayWidthPx - inset * 2, 4);
+  const drawerCount = mod.drawerCount ?? 3;
+
+  useEffect(() => {
+    if (draggingRef.current) return;
+    groupRef.current?.y(mod.y * scale);
+    groupRef.current?.x(inset);
+  }, [inset, mod.y, scale]);
+
+  return (
+    <Group
+      ref={groupRef}
+      x={inset}
+      y={mod.y * scale}
+      draggable
+      dragBoundFunc={(pos) => {
+        const maxY = Math.max(0, wardrobeHeight * scale - heightPx);
+        return {
+          x: inset,
+          y: Math.min(Math.max(0, pos.y), maxY),
+        };
+      }}
+      onMouseDown={() => onSelect(mod.id)}
+      onTouchStart={() => onSelect(mod.id)}
+      onDragStart={() => {
+        draggingRef.current = true;
+        onSelect(mod.id);
+      }}
+      onDragEnd={(event) => {
+        const node = event.currentTarget;
+        const yMm = node.y() / scale;
+        // Resolve in store, then pin the node immediately so drawers don't
+        // visually stick above the floor while React re-renders.
+        onDragEnd(mod.id, yMm);
+        const resolved = useWardrobeStore
+          .getState()
+          .modules.find((item) => item.id === mod.id);
+        if (resolved) {
+          node.y(resolved.y * scale);
+          node.x(inset);
+        }
+        draggingRef.current = false;
+      }}
+      onMouseEnter={(event) => {
+        const stage = event.target.getStage();
+        if (stage) stage.container().style.cursor = "ns-resize";
+      }}
+      onMouseLeave={(event) => {
+        const stage = event.target.getStage();
+        if (stage) stage.container().style.cursor = "default";
+      }}
+    >
+      {mod.type === "drawer-pack" ? (
+        <DrawerPackVisual
+          widthPx={widthPx}
+          heightPx={heightPx}
+          drawerCount={drawerCount}
+          selected={selected}
+        />
+      ) : mod.type === "hanging-rail" ? (
+        <HangingRailVisual
+          widthPx={widthPx}
+          heightPx={heightPx}
+          selected={selected}
+        />
+      ) : (
+        <Rect
+          width={widthPx}
+          height={Math.max(heightPx, 4)}
+          fill={MODULE_FILL.shelf}
+          cornerRadius={2}
+          stroke={selected ? "#0b6f6b" : MODULE_STROKE.shelf}
+          strokeWidth={selected ? 2 : 1}
+          shadowColor="rgba(16, 35, 58, 0.2)"
+          shadowBlur={selected ? 6 : 3}
+          shadowOffsetY={1}
+        />
+      )}
+    </Group>
+  );
+}
+
+function HangingRailVisual({
+  widthPx,
+  heightPx,
+  selected,
+}: {
+  widthPx: number;
+  heightPx: number;
+  selected: boolean;
+}) {
+  const bracketW = Math.max(10, Math.min(18, widthPx * 0.06));
+  const bracketH = Math.max(16, heightPx * 0.85);
+  const rodH = Math.max(6, heightPx * 0.38);
+  const rodY = (heightPx - rodH) / 2;
+  const rodX = bracketW * 0.55;
+  const rodW = widthPx - rodX * 2;
+  const accent = selected ? "#0f766e" : "#64748b";
+  const chromeLight = "#f8fafc";
+  const chromeMid = "#cbd5e1";
+  const chromeDark = "#64748b";
+
+  const hangerCount = Math.max(2, Math.min(5, Math.floor(widthPx / 70)));
+  const hangerGap = rodW / (hangerCount + 1);
+
+  return (
+    <Group>
+      {/* Invisible hit area */}
+      <Rect width={widthPx} height={heightPx} fill="rgba(0,0,0,0)" />
+
+      {/* Left wall bracket */}
+      <Rect
+        x={0}
+        y={(heightPx - bracketH) / 2}
+        width={bracketW}
+        height={bracketH}
+        fillLinearGradientStartPoint={{ x: 0, y: 0 }}
+        fillLinearGradientEndPoint={{ x: bracketW, y: 0 }}
+        fillLinearGradientColorStops={[0, chromeDark, 0.5, chromeMid, 1, chromeLight]}
+        cornerRadius={3}
+        stroke={accent}
+        strokeWidth={selected ? 2 : 1}
+      />
+      <Circle
+        x={bracketW * 0.55}
+        y={heightPx / 2}
+        radius={Math.max(3, rodH * 0.45)}
+        fill={chromeDark}
+        stroke={chromeLight}
+        strokeWidth={1}
+      />
+
+      {/* Right wall bracket */}
+      <Rect
+        x={widthPx - bracketW}
+        y={(heightPx - bracketH) / 2}
+        width={bracketW}
+        height={bracketH}
+        fillLinearGradientStartPoint={{ x: 0, y: 0 }}
+        fillLinearGradientEndPoint={{ x: bracketW, y: 0 }}
+        fillLinearGradientColorStops={[0, chromeLight, 0.5, chromeMid, 1, chromeDark]}
+        cornerRadius={3}
+        stroke={accent}
+        strokeWidth={selected ? 2 : 1}
+      />
+      <Circle
+        x={widthPx - bracketW * 0.55}
+        y={heightPx / 2}
+        radius={Math.max(3, rodH * 0.45)}
+        fill={chromeDark}
+        stroke={chromeLight}
+        strokeWidth={1}
+      />
+
+      {/* Chrome hanging rod */}
+      <Rect
+        x={rodX}
+        y={rodY}
+        width={rodW}
+        height={rodH}
+        fillLinearGradientStartPoint={{ x: 0, y: 0 }}
+        fillLinearGradientEndPoint={{ x: 0, y: rodH }}
+        fillLinearGradientColorStops={[
+          0,
+          chromeLight,
+          0.35,
+          chromeMid,
+          0.7,
+          "#94a3b8",
+          1,
+          chromeDark,
+        ]}
+        cornerRadius={rodH / 2}
+        shadowColor="rgba(15, 23, 42, 0.35)"
+        shadowBlur={selected ? 8 : 4}
+        shadowOffsetY={2}
+        shadowOpacity={0.4}
+        stroke={selected ? "#0f766e" : "#475569"}
+        strokeWidth={selected ? 1.5 : 1}
+      />
+      {/* Highlight shine on rod */}
+      <Rect
+        x={rodX + 4}
+        y={rodY + rodH * 0.18}
+        width={Math.max(8, rodW - 8)}
+        height={Math.max(1.5, rodH * 0.22)}
+        fill="rgba(255,255,255,0.65)"
+        cornerRadius={rodH}
+        listening={false}
+      />
+
+      {/* Simple coat-hanger silhouettes */}
+      {Array.from({ length: hangerCount }, (_, index) => {
+        const cx = rodX + hangerGap * (index + 1);
+        const top = rodY + rodH * 0.65;
+        const arm = Math.max(10, Math.min(18, widthPx * 0.04));
+        return (
+          <Group key={index} listening={false} opacity={0.55}>
+            <Line
+              points={[cx, top, cx, top + 10]}
+              stroke="#475569"
+              strokeWidth={1.5}
+              lineCap="round"
+            />
+            <Line
+              points={[cx - arm, top + 16, cx, top + 10, cx + arm, top + 16]}
+              stroke="#475569"
+              strokeWidth={1.5}
+              lineCap="round"
+              lineJoin="round"
+            />
+          </Group>
+        );
+      })}
+    </Group>
+  );
+}
+
+function DrawerPackVisual({
+  widthPx,
+  heightPx,
+  drawerCount,
+  selected,
+}: {
+  widthPx: number;
+  heightPx: number;
+  drawerCount: number;
+  selected: boolean;
+}) {
+  const gap = Math.max(2, 3 * (heightPx / Math.max(heightPx, 1)));
+  const slotHeight = (heightPx - gap * (drawerCount + 1)) / drawerCount;
+
+  return (
+    <Group>
+      <Rect
+        width={widthPx}
+        height={heightPx}
+        fill="#efe2d2"
+        cornerRadius={2}
+        stroke={selected ? "#6f5234" : "#a88862"}
+        strokeWidth={selected ? 2 : 1}
+      />
+      {Array.from({ length: drawerCount }, (_, index) => {
+        const y = gap + index * (slotHeight + gap);
+        const handleW = Math.min(widthPx * 0.34, 48);
+        const handleH = Math.max(2, Math.min(4, slotHeight * 0.12));
+        return (
+          <Group key={index}>
+            <Rect
+              x={gap}
+              y={y}
+              width={widthPx - gap * 2}
+              height={Math.max(4, slotHeight)}
+              fillLinearGradientStartPoint={{ x: 0, y: 0 }}
+              fillLinearGradientEndPoint={{ x: 0, y: slotHeight }}
+              fillLinearGradientColorStops={[0, "#c4a27a", 1, "#9a754c"]}
+              cornerRadius={3}
+              stroke="#7a5a38"
+              strokeWidth={1}
+            />
+            <Rect
+              x={(widthPx - handleW) / 2}
+              y={y + slotHeight / 2 - handleH / 2}
+              width={handleW}
+              height={handleH}
+              fill="#d9c3a3"
+              cornerRadius={handleH}
+              stroke="#8d6b45"
+              strokeWidth={0.75}
+            />
+          </Group>
+        );
+      })}
+      {heightPx >= 28 && (
+        <Text
+          text={`${drawerCount} drawer${drawerCount === 1 ? "" : "s"}`}
+          width={widthPx}
+          y={6}
+          align="center"
+          fontSize={Math.min(12, Math.max(9, heightPx * 0.08))}
+          fill="#fffaf3"
+          fontStyle="bold"
+          listening={false}
+        />
+      )}
+    </Group>
+  );
+}
+
+export function WardrobeCanvas() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<Konva.Stage>(null);
+  const [size, setSize] = useState({ width: 800, height: 600 });
+
+  const wardrobe = useWardrobeStore((state) => state.wardrobe);
+  const bays = useWardrobeStore((state) => state.bays);
+  const modules = useWardrobeStore((state) => state.modules);
+  const selectedBayId = useWardrobeStore((state) => state.selectedBayId);
+  const selectedModuleId = useWardrobeStore((state) => state.selectedModuleId);
+  const materials = useWardrobeStore((state) => state.materials);
+  const selectBay = useWardrobeStore((state) => state.selectBay);
+  const selectModule = useWardrobeStore((state) => state.selectModule);
+  const updateModuleY = useWardrobeStore((state) => state.updateModuleY);
+  const setCarcassHeight = useWardrobeStore((state) => state.setCarcassHeight);
+  const constructDragRef = useRef(false);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setSize({
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+      });
+    });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const scale = useMemo(() => {
+    const contentWmm = wardrobe.width + BOARD_THICKNESS_MM * 2;
+    const contentHmm = wardrobe.height + BOARD_THICKNESS_MM * 2;
+    // Dim label gutters are fixed px — subtract them from the fit box
+    const availableWidth = Math.max(
+      120,
+      size.width - EDGE_GAP * 2 - DIM_LEFT - DIM_RIGHT,
+    );
+    const availableHeight = Math.max(
+      120,
+      size.height - EDGE_GAP * 2 - DIM_TOP - DIM_BOTTOM,
+    );
+    return Math.min(availableWidth / contentWmm, availableHeight / contentHmm);
+  }, [size.height, size.width, wardrobe.height, wardrobe.width]);
+
+  const boardPx = BOARD_THICKNESS_MM * scale;
+  const innerWidth = wardrobe.width * scale;
+  const innerHeight = wardrobe.height * scale;
+  const outerWidth = innerWidth + boardPx * 2;
+  const outerHeight = innerHeight + boardPx * 2;
+  // Stage tightly wraps wardrobe + dimension labels (no huge empty background)
+  const stageWidth = Math.ceil(outerWidth + DIM_LEFT + DIM_RIGHT);
+  const stageHeight = Math.ceil(outerHeight + DIM_TOP + DIM_BOTTOM);
+  const originX = DIM_LEFT;
+  const originY = DIM_TOP;
+
+  const interiorFill =
+    materials.boardMaterial === "woodgrain" ? "#d8b896" : "#f7f5f1";
+  const dimColor = "#8d6b45";
+  const carcassHeight = wardrobe.carcassHeight;
+  const constructYmm = constructionShelfY(wardrobe.height, carcassHeight);
+  const constructYpx = constructYmm * scale;
+  const constructHpx = CONSTRUCTION_SHELF_HEIGHT_MM * scale;
+  const mainTopPx = constructYpx + constructHpx;
+  const minConstructYpx =
+    constructionShelfY(
+      wardrobe.height,
+      wardrobe.height - MIN_TOP_BOX_MM,
+    ) * scale;
+  const maxConstructYpx =
+    constructionShelfY(wardrobe.height, MIN_CARCASS_HEIGHT_MM) * scale;
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex h-full w-full items-center justify-center bg-white"
+    >
+      <Stage
+        ref={stageRef}
+        width={stageWidth}
+        height={stageHeight}
+        className="wardrobe-stage"
+      >
+        <Layer>
+          {/* Clean white page — wardrobe only */}
+          <Rect
+            x={0}
+            y={0}
+            width={stageWidth}
+            height={stageHeight}
+            fill="#ffffff"
+            listening={false}
+          />
+
+          <Group x={originX} y={originY}>
+            {/* Solid black carcass */}
+            <Rect
+              x={0}
+              y={0}
+              width={outerWidth}
+              height={outerHeight}
+              fill={FRAME_COLOR}
+            />
+            {/* Small bevels on the outer frame */}
+            <Line
+              points={[1.5, 1.5, outerWidth - 1.5, 1.5]}
+              stroke={BEVEL_LIGHT}
+              strokeWidth={2}
+              listening={false}
+            />
+            <Line
+              points={[1.5, 1.5, 1.5, outerHeight - 1.5]}
+              stroke={BEVEL_LIGHT}
+              strokeWidth={2}
+              listening={false}
+            />
+            <Line
+              points={[
+                1.5,
+                outerHeight - 1.5,
+                outerWidth - 1.5,
+                outerHeight - 1.5,
+              ]}
+              stroke={BEVEL_DARK}
+              strokeWidth={2}
+              listening={false}
+            />
+            <Line
+              points={[
+                outerWidth - 1.5,
+                1.5,
+                outerWidth - 1.5,
+                outerHeight - 1.5,
+              ]}
+              stroke={BEVEL_DARK}
+              strokeWidth={2}
+              listening={false}
+            />
+
+            {/* Interior (modules live here — drawers sit flush above the bottom board) */}
+            <Group x={boardPx} y={boardPx}>
+              <Rect
+                x={0}
+                y={0}
+                width={innerWidth}
+                height={innerHeight}
+                fill={interiorFill}
+              />
+
+              {bays.map((bay, index) => {
+                const bayX = getBayOriginX(bays, index) * scale;
+                const bayWidthPx = bay.width * scale;
+                const isSelected = bay.id === selectedBayId;
+                const bayModules = modules.filter(
+                  (mod) => mod.bayId === bay.id,
+                );
+                const isDrawerBay = Boolean(bay.lockedWidth);
+
+                return (
+                  <Group
+                    key={bay.id}
+                    x={bayX}
+                    y={0}
+                    clipX={0}
+                    clipY={0}
+                    clipWidth={bayWidthPx}
+                    clipHeight={innerHeight}
+                  >
+                    <Rect
+                      x={0}
+                      y={0}
+                      width={bayWidthPx}
+                      height={innerHeight}
+                      fill={
+                        isSelected ? "rgba(141, 107, 69, 0.1)" : "transparent"
+                      }
+                      onClick={() => selectBay(bay.id)}
+                      onTap={() => selectBay(bay.id)}
+                    />
+
+                    {/* Dividers only in the main carcass — not through the top box */}
+                    {index > 0 && (
+                      <Line
+                        points={[0, mainTopPx, 0, innerHeight]}
+                        stroke={FRAME_COLOR}
+                        strokeWidth={DIVIDER_STROKE}
+                        listening={false}
+                      />
+                    )}
+
+                    <Text
+                      x={0}
+                      y={mainTopPx + 10}
+                      width={bayWidthPx}
+                      align="center"
+                      text={
+                        isDrawerBay
+                          ? `Bay ${index + 1} · ${bay.width} mm`
+                          : `Bay ${index + 1}`
+                      }
+                      fontSize={11}
+                      fill={isSelected ? "#6f5234" : "#6d7380"}
+                      fontStyle="bold"
+                      listening={false}
+                    />
+
+                    {bayModules.map((mod) => (
+                      <ModuleShape
+                        key={mod.id}
+                        mod={mod}
+                        bayWidthPx={bayWidthPx}
+                        scale={scale}
+                        wardrobeHeight={wardrobe.height}
+                        selected={mod.id === selectedModuleId}
+                        onSelect={selectModule}
+                        onDragEnd={updateModuleY}
+                      />
+                    ))}
+                  </Group>
+                );
+              })}
+
+              {/* Construction shelf — drag vertically to set main carcass height */}
+              <Rect
+                id="construct-board"
+                x={0}
+                y={constructYpx}
+                width={innerWidth}
+                height={Math.max(constructHpx, 10)}
+                fill={FRAME_COLOR}
+                draggable
+                hitStrokeWidth={36}
+                dragBoundFunc={(pos) => ({
+                  x: 0,
+                  y: Math.min(
+                    Math.max(pos.y, minConstructYpx),
+                    maxConstructYpx,
+                  ),
+                })}
+                onMouseEnter={(event) => {
+                  const stage = event.target.getStage();
+                  if (stage) stage.container().style.cursor = "ns-resize";
+                }}
+                onMouseLeave={(event) => {
+                  if (constructDragRef.current) return;
+                  const stage = event.target.getStage();
+                  if (stage) stage.container().style.cursor = "default";
+                }}
+                onTouchStart={() => {
+                  constructDragRef.current = true;
+                }}
+                onDragStart={() => {
+                  constructDragRef.current = true;
+                }}
+                onDragEnd={(event) => {
+                  const node = event.target;
+                  const yMm = node.y() / scale;
+                  const nextCarcass =
+                    Math.round(
+                      (wardrobe.height - yMm) / SNAP_INCREMENT_MM,
+                    ) * SNAP_INCREMENT_MM;
+                  setCarcassHeight(nextCarcass);
+                  const resolved = useWardrobeStore.getState().wardrobe;
+                  node.y(
+                    constructionShelfY(
+                      resolved.height,
+                      resolved.carcassHeight,
+                    ) * scale,
+                  );
+                  constructDragRef.current = false;
+                  const stage = node.getStage();
+                  if (stage) stage.container().style.cursor = "default";
+                }}
+              />
+
+              {materials.slidingDoors && (
+                <Group listening={false}>
+                  <Line
+                    points={[innerWidth / 2, 0, innerWidth / 2, innerHeight]}
+                    stroke="rgba(23, 26, 31, 0.28)"
+                    strokeWidth={2}
+                    dash={[8, 6]}
+                  />
+                </Group>
+              )}
+            </Group>
+
+            <Line
+              points={[
+                0,
+                outerHeight + 30,
+                outerWidth,
+                outerHeight + 30,
+              ]}
+              stroke={dimColor}
+              strokeWidth={1.5}
+            />
+            <Line
+              points={[0, outerHeight + 24, 0, outerHeight + 36]}
+              stroke={dimColor}
+              strokeWidth={1.5}
+            />
+            <Line
+              points={[
+                outerWidth,
+                outerHeight + 24,
+                outerWidth,
+                outerHeight + 36,
+              ]}
+              stroke={dimColor}
+              strokeWidth={1.5}
+            />
+            <Text
+              x={0}
+              y={outerHeight + 38}
+              width={outerWidth}
+              align="center"
+              text={`${wardrobe.width} mm`}
+              fontSize={14}
+              fill={FRAME_COLOR}
+              fontStyle="bold"
+            />
+
+            <Line
+              points={[-30, 0, -30, outerHeight]}
+              stroke={dimColor}
+              strokeWidth={1.5}
+            />
+            <Line points={[-36, 0, -24, 0]} stroke={dimColor} strokeWidth={1.5} />
+            <Line
+              points={[-36, outerHeight, -24, outerHeight]}
+              stroke={dimColor}
+              strokeWidth={1.5}
+            />
+            <Line
+              points={[
+                -36,
+                boardPx + constructYpx,
+                -24,
+                boardPx + constructYpx,
+              ]}
+              stroke={FRAME_COLOR}
+              strokeWidth={2}
+            />
+            <Text
+              x={-74}
+              y={outerHeight / 2 - 10}
+              width={40}
+              align="center"
+              text={`${wardrobe.height}`}
+              fontSize={13}
+              fill={FRAME_COLOR}
+              fontStyle="bold"
+            />
+            <Text
+              x={-74}
+              y={outerHeight / 2 + 8}
+              width={40}
+              align="center"
+              text="mm"
+              fontSize={12}
+              fill="#6d7380"
+            />
+            <Text
+              x={boardPx + 8}
+              y={boardPx + constructYpx - 14}
+              text={`${carcassHeight} mm`}
+              fontSize={11}
+              fill="#0a0a0a"
+              listening={false}
+            />
+          </Group>
+        </Layer>
+      </Stage>
+    </div>
+  );
+}
