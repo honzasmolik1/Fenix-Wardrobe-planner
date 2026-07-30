@@ -1,7 +1,8 @@
 import {
   DRAWER_BAY_WIDTH_MM,
-  DRAWER_UNIT_HEIGHT_MM,
+  DUAL_RAIL_SPACING_MM,
   MODULE_HEIGHTS,
+  RAIL_FROM_TOP_MM,
   drawerPackHeight,
   mainZoneTop,
 } from "@/lib/constants";
@@ -22,9 +23,12 @@ function evenShelfYs(
   const spanHeight = Math.max(shelfHeight * count, zoneBottom - zoneTop);
   const totalShelf = count * shelfHeight;
   const gap = (spanHeight - totalShelf) / (count + 1);
-  return Array.from({ length: count }, (_, index) =>
-    Math.round(zoneTop + gap * (index + 1) + shelfHeight * index),
-  );
+  return Array.from({ length: count }, (_, index) => {
+    const raw = zoneTop + gap * (index + 1) + shelfHeight * index;
+    const gapAbove = raw - zoneTop;
+    const snappedGap = Math.round(gapAbove / 10) * 10;
+    return Math.round(zoneTop + Math.max(0, snappedGap));
+  });
 }
 
 /**
@@ -81,9 +85,9 @@ export function createStandardModules(
   // Bay 1: five shelves evenly through the 2 m main zone
   const bay1ShelfYs = evenShelfYs(5, zoneTop, zoneBottom, shelfH);
 
-  // Bay 2: double hang inside the main zone
-  const topRailY = zoneTop + 80;
-  const midRailY = topRailY + railH + 1000;
+  // Bay 2: double hang — 50 mm from top, 900 mm clear between rails
+  const topRailY = zoneTop + RAIL_FROM_TOP_MM;
+  const midRailY = topRailY + railH + DUAL_RAIL_SPACING_MM;
 
   // Bay 3: shelves in the pocket above the drawer pack (still under construction)
   const shelfZoneBottom = Math.max(zoneTop + shelfH * 2 + 64, drawerY);
@@ -113,7 +117,7 @@ export function createStandardModules(
       id: createId(),
       type: "hanging-rail",
       bayId: bay2.id,
-      y: Math.min(midRailY, drawerY - railH - DRAWER_UNIT_HEIGHT_MM),
+      y: midRailY,
       height: railH,
     },
     {
@@ -146,7 +150,7 @@ export function resizeBaysPreservingLocks(
 ): Bay[] {
   const sorted = [...bays].sort((a, b) => a.index - b.index);
   const lockedTotal = sorted.reduce(
-    (sum, bay) => sum + (bay.lockedWidth ?? 0),
+    (sum, bay) => sum + (bay.lockedWidth ? DRAWER_BAY_WIDTH_MM : 0),
     0,
   );
   const flexible = sorted.filter((bay) => !bay.lockedWidth);
@@ -156,7 +160,8 @@ export function resizeBaysPreservingLocks(
     return sorted.map((bay, index) => ({
       ...bay,
       index,
-      width: bay.lockedWidth ?? bay.width,
+      width: bay.lockedWidth ? DRAWER_BAY_WIDTH_MM : bay.width,
+      lockedWidth: bay.lockedWidth ? DRAWER_BAY_WIDTH_MM : undefined,
     }));
   }
 
@@ -171,7 +176,12 @@ export function resizeBaysPreservingLocks(
   let flexIndex = 0;
   return sorted.map((bay, index) => {
     if (bay.lockedWidth) {
-      return { ...bay, index, width: bay.lockedWidth };
+      return {
+        ...bay,
+        index,
+        width: DRAWER_BAY_WIDTH_MM,
+        lockedWidth: DRAWER_BAY_WIDTH_MM,
+      };
     }
     const width = raw[flexIndex] ?? Math.floor(flexibleBudget / flexible.length);
     flexIndex += 1;
@@ -182,8 +192,8 @@ export function resizeBaysPreservingLocks(
 export const MIN_FLEXIBLE_BAY_WIDTH_MM = 300;
 
 /**
- * Build N bays. If keepDrawerBay, the last bay is locked at 600 mm and the
- * rest share leftover width equally. Total width stays the same.
+ * Build N bays. If keepDrawerBay, the last bay is locked at DRAWER_BAY_WIDTH_MM
+ * and the rest share leftover width equally. Total width stays the same.
  */
 export function createBaysWithCount(
   width: number,
@@ -285,7 +295,7 @@ export function setFlexibleBayWidth(
   if (!target || target.lockedWidth) return sorted;
 
   const lockedTotal = sorted.reduce(
-    (sum, bay) => sum + (bay.lockedWidth ?? 0),
+    (sum, bay) => sum + (bay.lockedWidth ? DRAWER_BAY_WIDTH_MM : 0),
     0,
   );
   const others = sorted.filter(
@@ -336,7 +346,12 @@ export function setFlexibleBayWidth(
   let otherIndex = 0;
   return sorted.map((bay, index) => {
     if (bay.lockedWidth) {
-      return { ...bay, index, width: bay.lockedWidth };
+      return {
+        ...bay,
+        index,
+        width: DRAWER_BAY_WIDTH_MM,
+        lockedWidth: DRAWER_BAY_WIDTH_MM,
+      };
     }
     if (bay.id === bayId) {
       return { ...bay, index, width: clamped };

@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { DRAWER_BAY_WIDTH_MM } from "@/lib/constants";
 import {
+  canAddDrawer,
+  canAddRail,
+  canAddShelf,
+} from "@/lib/placement";
+import {
   MAX_DRAWER_COUNT,
   MIN_DRAWER_COUNT,
   type BoardMaterial,
@@ -26,13 +31,13 @@ const MODULE_OPTIONS: {
   {
     type: "drawer-pack",
     label: "Drawer Unit",
-    hint: "Fixed 600 mm bay",
+    hint: "Fixed 500 mm bay",
     accent: "#8d6b45",
   },
   {
     type: "hanging-rail",
     label: "Hanging Rail",
-    hint: "~1000 mm clearance",
+    hint: "50 mm from top · 900 mm hang",
     accent: "#5b6472",
   },
 ];
@@ -114,6 +119,28 @@ export function Sidebar() {
   const selectedBayOrder = selectedBay
     ? sortedBays.findIndex((bay) => bay.id === selectedBay.id)
     : -1;
+  const activeBayId = selectedBayId ?? bays[0]?.id ?? null;
+  const activeBayModules = activeBayId
+    ? modules.filter((mod) => mod.bayId === activeBayId)
+    : [];
+  const canAddBase = Boolean(activeBayId);
+
+  const moduleEnabled = (type: ModuleType): boolean => {
+    if (!canAddBase) return false;
+    if (type === "shelf") {
+      return canAddShelf(
+        activeBayModules,
+        wardrobe.height,
+        wardrobe.carcassHeight,
+      );
+    }
+    if (type === "drawer-pack") return canAddDrawer(activeBayModules);
+    return canAddRail(
+      activeBayModules,
+      wardrobe.height,
+      wardrobe.carcassHeight,
+    );
+  };
 
   return (
     <aside className="panel-glass flex h-full w-full max-w-[400px] flex-col border-l border-[var(--line)]">
@@ -355,9 +382,15 @@ export function Sidebar() {
                 key={option.type}
                 type="button"
                 onClick={() => addModule(option.type)}
-                disabled={!selectedBayId && bays.length === 0}
-                className="module-btn !rounded-lg !px-2 !py-2"
-                title={option.hint}
+                disabled={!moduleEnabled(option.type)}
+                className="module-btn !rounded-lg !px-2 !py-2 disabled:cursor-not-allowed disabled:opacity-40"
+                title={
+                  !moduleEnabled(option.type) && canAddBase
+                    ? option.type === "hanging-rail"
+                      ? "Max 2 rails per bay"
+                      : "Not available with 2 rails"
+                    : option.hint
+                }
               >
                 <span
                   className="mx-auto mb-1 block h-1.5 w-1.5 rounded-full"

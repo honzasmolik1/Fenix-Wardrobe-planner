@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 import { DRAWER_BAY_WIDTH_MM } from "@/lib/constants";
 import { exportQuotePdf } from "@/lib/exportQuote";
 import {
+  canAddDrawer,
+  canAddRail,
+  canAddShelf,
+} from "@/lib/placement";
+import {
   MAX_DRAWER_COUNT,
   MIN_DRAWER_COUNT,
   type ModuleType,
@@ -34,6 +39,7 @@ const MODULE_OPTIONS: {
 export function TopBar() {
   const wardrobe = useWardrobeStore((state) => state.wardrobe);
   const bays = useWardrobeStore((state) => state.bays);
+  const modules = useWardrobeStore((state) => state.modules);
   const selectedBayId = useWardrobeStore((state) => state.selectedBayId);
   const materials = useWardrobeStore((state) => state.materials);
   const bayCountInput = useWardrobeStore((state) => state.bayCountInput);
@@ -129,6 +135,41 @@ export function TopBar() {
 
   const sortedBays = [...bays].sort((a, b) => a.index - b.index);
   const canAdd = Boolean(selectedBayId) || bays.length > 0;
+  const activeBayId = selectedBayId ?? bays[0]?.id ?? null;
+  const activeBayModules = activeBayId
+    ? modules.filter((mod) => mod.bayId === activeBayId)
+    : [];
+
+  const moduleEnabled = (type: ModuleType): boolean => {
+    if (!canAdd) return false;
+    if (type === "shelf") {
+      return canAddShelf(
+        activeBayModules,
+        wardrobe.height,
+        wardrobe.carcassHeight,
+      );
+    }
+    if (type === "drawer-pack") return canAddDrawer(activeBayModules);
+    return canAddRail(
+      activeBayModules,
+      wardrobe.height,
+      wardrobe.carcassHeight,
+    );
+  };
+
+  const moduleTitle = (type: ModuleType, label: string): string => {
+    if (!canAdd) return label;
+    if (type === "shelf" && !moduleEnabled(type)) {
+      return "No shelves in a double-hang bay";
+    }
+    if (type === "drawer-pack" && !moduleEnabled(type)) {
+      return "No drawers in a double-hang bay";
+    }
+    if (type === "hanging-rail" && !moduleEnabled(type)) {
+      return "Max 2 rails per bay";
+    }
+    return label;
+  };
 
   return (
     <header className="toolbar-shell relative z-20 w-full border-b border-[var(--line)] bg-white/95 backdrop-blur-xl">
@@ -322,13 +363,18 @@ export function TopBar() {
 
         <div className="toolbar-section">
           <select
-            aria-label="Default drawer count"
-            value={defaultDrawerCount}
+            aria-label="Drawer count"
+            value={
+              modules.find(
+                (mod) =>
+                  mod.bayId === selectedBayId && mod.type === "drawer-pack",
+              )?.drawerCount ?? defaultDrawerCount
+            }
             onChange={(event) =>
               setDefaultDrawerCount(Number(event.target.value))
             }
             className="toolbar-select"
-            title="Drawers when adding a unit"
+            title="Drawer count for selected bay (or new units)"
           >
             {Array.from(
               { length: MAX_DRAWER_COUNT - MIN_DRAWER_COUNT + 1 },
@@ -344,10 +390,10 @@ export function TopBar() {
               key={option.type}
               type="button"
               onClick={() => addModule(option.type)}
-              disabled={!canAdd}
-              className="touch-btn touch-btn-add"
+              disabled={!moduleEnabled(option.type)}
+              className="touch-btn touch-btn-add disabled:cursor-not-allowed disabled:opacity-40"
               style={{ borderColor: `${option.accent}55` }}
-              title={option.label}
+              title={moduleTitle(option.type, option.label)}
             >
               <span
                 className="inline-block h-2 w-2 rounded-full"

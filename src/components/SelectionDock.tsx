@@ -46,6 +46,9 @@ export function SelectionDock() {
     ? modules.filter((mod) => mod.bayId === selectedBay.id)
     : modules;
   const bayShelfCount = bayModules.filter((mod) => mod.type === "shelf").length;
+  const bayDrawer =
+    bayModules.find((mod) => mod.type === "drawer-pack") ??
+    (selectedModule?.type === "drawer-pack" ? selectedModule : null);
 
   if (!selectedBay && modules.length === 0) {
     return (
@@ -141,15 +144,30 @@ export function SelectionDock() {
         </div>
 
         <div className="toolbar-section">
-          {selectedModule?.type === "drawer-pack" && (
+          {bayDrawer && (
             <>
               <span className="toolbar-label">Drawers</span>
+              <button
+                type="button"
+                disabled={(bayDrawer.drawerCount ?? 3) <= MIN_DRAWER_COUNT}
+                onClick={() =>
+                  setDrawerCount(
+                    bayDrawer.id,
+                    (bayDrawer.drawerCount ?? 3) - 1,
+                  )
+                }
+                className="touch-btn disabled:cursor-not-allowed disabled:opacity-40"
+                title="Fewer drawers"
+              >
+                −
+              </button>
               <select
-                value={selectedModule.drawerCount ?? defaultDrawerCount}
+                value={bayDrawer.drawerCount ?? defaultDrawerCount}
                 onChange={(event) =>
-                  setDrawerCount(selectedModule.id, Number(event.target.value))
+                  setDrawerCount(bayDrawer.id, Number(event.target.value))
                 }
                 className="toolbar-select"
+                title="Drawer count"
               >
                 {Array.from(
                   { length: MAX_DRAWER_COUNT - MIN_DRAWER_COUNT + 1 },
@@ -162,7 +180,21 @@ export function SelectionDock() {
               </select>
               <button
                 type="button"
-                onClick={() => sendModuleToFloor(selectedModule.id)}
+                disabled={(bayDrawer.drawerCount ?? 3) >= MAX_DRAWER_COUNT}
+                onClick={() =>
+                  setDrawerCount(
+                    bayDrawer.id,
+                    (bayDrawer.drawerCount ?? 3) + 1,
+                  )
+                }
+                className="touch-btn disabled:cursor-not-allowed disabled:opacity-40"
+                title="More drawers"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                onClick={() => sendModuleToFloor(bayDrawer.id)}
                 className="touch-btn"
               >
                 Floor

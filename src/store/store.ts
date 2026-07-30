@@ -6,6 +6,7 @@ import {
   DRAWER_UNIT_HEIGHT_MM,
   JACKET_CLEARANCE_MM,
   MAX_DRAWER_COUNT,
+  MAX_RAILS_PER_BAY,
   MIN_DRAWER_COUNT,
   MODULE_CLEARANCE_MM,
   MODULE_HEIGHTS,
@@ -14,14 +15,16 @@ import {
   drawerPackHeight,
 } from "@/lib/constants";
 import {
+  canAddDrawer,
+  canAddRail,
   canAddShelf,
   evenSpaceShelvesInBay,
-  findDrawerPlacementY,
   findHangingRailPlacementY,
   reconcileModulesForCarcassHeight,
   redistributeShelvesEvenly,
   resolveFloorY,
   resolveModuleY,
+  syncBayRailPositions,
 } from "@/lib/placement";
 import {
   createBaysWithCount,
@@ -78,6 +81,8 @@ export interface WardrobeState {
   modules: Module[];
   selectedBayId: string | null;
   selectedModuleId: string | null;
+  /** When false, canvas shows no bay/module highlight (for clean screenshots). */
+  canvasHighlight: boolean;
   materials: Materials;
   bayCountInput: number;
   defaultDrawerCount: number;
@@ -94,6 +99,7 @@ export interface WardrobeState {
   swapBayWithNeighbor: (bayId: string, direction: "left" | "right") => void;
   selectBay: (bayId: string | null) => void;
   selectModule: (moduleId: string | null) => void;
+  clearCanvasHighlight: () => void;
   addModule: (type: ModuleType) => void;
   updateModuleY: (moduleId: string, y: number) => void;
   sendModuleToFloor: (moduleId: string) => void;
@@ -142,6 +148,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
   modules: DEFAULT_MODULES,
   selectedBayId: DEFAULT_BAYS[0]?.id ?? null,
   selectedModuleId: null,
+  canvasHighlight: true,
   materials: {
     boardMaterial: "white-melamine",
     hardwareTier: "standard",
@@ -205,7 +212,19 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
   },
 
   setDefaultDrawerCount: (count) => {
-    set({ defaultDrawerCount: clampDrawerCount(count) });
+    const drawerCount = clampDrawerCount(count);
+    const { selectedBayId, modules } = get();
+    set({ defaultDrawerCount: drawerCount });
+
+    // If the selected bay already has a drawer unit, update it live
+    const drawer = selectedBayId
+      ? modules.find(
+          (mod) => mod.bayId === selectedBayId && mod.type === "drawer-pack",
+        )
+      : null;
+    if (drawer) {
+      get().setDrawerCount(drawer.id, drawerCount);
+    }
   },
 
   divideIntoBays: (count) => {
@@ -288,52 +307,48 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
       const swapIndex = direction === "left" ? index - 1 : index + 1;
       if (swapIndex < 0 || swapIndex >= sorted.length) return state;
 
-      const bayA = sorted[index];
-      const bayB = sorted[swapIndex];
+      // Swap positions in the ordered list, then reindex 0..n
+      const reordered = [...sorted];
+      const moved = reordered[index];
+      reordered[index] = reordered[swapIndex];
+      reordered[swapIndex] = moved;
 
-      // Swap fittings AND widths/locks so the drawer bay keeps its fixed size
-      const nextBays = sorted.map((bay, i) => {
-        if (i === index) {
-          return {
-            ...bay,
-            width: bayB.width,
-            lockedWidth: bayB.lockedWidth,
-          };
-        }
-        if (i === swapIndex) {
-          return {
-            ...bay,
-            width: bayA.width,
-            lockedWidth: bayA.lockedWidth,
-          };
-        }
-        return bay;
-      });
+      const nextBays = reordered.map((bay, i) => ({ ...bay, index: i }));
 
-      const nextModules = state.modules.map((mod) => {
-        if (mod.bayId === bayA.id) return { ...mod, bayId: bayB.id };
-        if (mod.bayId === bayB.id) return { ...mod, bayId: bayA.id };
-        return mod;
-      });
+      const drawerInMovedBay = state.modules.find(
+        (mod) => mod.bayId === moved.id && mod.type === "drawer-pack",
+      );
 
       return {
         bays: nextBays,
-        modules: nextModules,
-        selectedBayId: bayB.id,
-        selectedModuleId: null,
+        selectedBayId: moved.id,
+        selectedModuleId: drawerInMovedBay?.id ?? state.selectedModuleId,
+        canvasHighlight: true,
       };
     });
   },
 
-  selectBay: (bayId) => set({ selectedBayId: bayId, selectedModuleId: null }),
+  selectBay: (bayId) =>
+    set({
+      selectedBayId: bayId,
+      selectedModuleId: null,
+      canvasHighlight: bayId !== null,
+    }),
 
   selectModule: (moduleId) => {
     const mod = get().modules.find((item) => item.id === moduleId) ?? null;
     set({
       selectedModuleId: moduleId,
       selectedBayId: mod?.bayId ?? get().selectedBayId,
+      canvasHighlight: true,
     });
   },
+
+  clearCanvasHighlight: () =>
+    set({
+      canvasHighlight: false,
+      selectedModuleId: null,
+    }),
 
   addModule: (type) => {
     const { selectedBayId, bays, wardrobe, modules, defaultDrawerCount } = get();
@@ -374,14 +389,15 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
     }
 
     if (type === "drawer-pack") {
+      if (!canAddDrawer(bayModules)) return;
+
       const drawerCount = clampDrawerCount(defaultDrawerCount);
       const height = drawerPackHeight(drawerCount);
-      const y = findDrawerPlacementY(height, bayModules, wardrobe.height);
-      if (y === null) return;
+      // Always sit on the floor — shelves above re-space / drop to make room
+      const y = Math.max(0, wardrobe.height - height);
 
       const id = createId();
       const { bays: currentBays, wardrobe: currentWardrobe } = get();
-      // Drawer bay width is fixed forever at DRAWER_BAY_WIDTH_MM
       const lockedBays = currentBays.map((bay) =>
         bay.id === bayId
           ? {
@@ -392,40 +408,95 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
           : bay,
       );
 
-      set({
-        bays: resizeBaysPreservingLocks(lockedBays, currentWardrobe.width),
-        modules: [
-          ...modules,
-          {
-            id,
-            type,
-            bayId,
-            y,
-            height,
-            drawerCount,
-          },
-        ],
-        selectedBayId: bayId,
-        selectedModuleId: id,
-      });
-      return;
-    }
-
-    const y = findHangingRailPlacementY(bayModules, wardrobe.height);
-    if (y === null) return;
-
-    const id = createId();
-    set({
-      modules: [
+      const withDrawer: Module[] = [
         ...modules,
         {
           id,
           type,
           bayId,
           y,
-          height: MODULE_HEIGHTS["hanging-rail"],
+          height,
+          drawerCount,
         },
-      ],
+      ];
+
+      set({
+        bays: resizeBaysPreservingLocks(lockedBays, currentWardrobe.width),
+        modules: redistributeShelvesEvenly(
+          withDrawer,
+          bayId,
+          wardrobe.height,
+          {
+            forceEven: true,
+            carcassHeight: wardrobe.carcassHeight,
+          },
+        ),
+        selectedBayId: bayId,
+        selectedModuleId: id,
+      });
+      return;
+    }
+
+    // Hanging rail — fixed at 50 mm from top; 2nd at +900 mm (clears shelves/drawers)
+    if (
+      !canAddRail(bayModules, wardrobe.height, wardrobe.carcassHeight)
+    ) {
+      return;
+    }
+
+    const existingRails = bayModules.filter(
+      (mod) => mod.type === "hanging-rail",
+    );
+    const nextCount = existingRails.length + 1;
+    const y = findHangingRailPlacementY(
+      bayModules,
+      wardrobe.height,
+      wardrobe.carcassHeight,
+    );
+    if (y === null) return;
+
+    const id = createId();
+    let nextModules: Module[] = [
+      ...modules,
+      {
+        id,
+        type: "hanging-rail",
+        bayId,
+        y,
+        height: MODULE_HEIGHTS["hanging-rail"],
+      },
+    ];
+
+    let nextBays = bays;
+    if (nextCount >= MAX_RAILS_PER_BAY) {
+      const hadDrawers = nextModules.some(
+        (mod) => mod.bayId === bayId && mod.type === "drawer-pack",
+      );
+      nextModules = nextModules.filter(
+        (mod) =>
+          !(
+            mod.bayId === bayId &&
+            (mod.type === "shelf" || mod.type === "drawer-pack")
+          ),
+      );
+      if (hadDrawers) {
+        const unlocked = bays.map((bay) =>
+          bay.id === bayId ? { ...bay, lockedWidth: undefined } : bay,
+        );
+        nextBays = resizeBaysPreservingLocks(unlocked, wardrobe.width);
+      }
+    }
+
+    nextModules = syncBayRailPositions(
+      nextModules,
+      bayId,
+      wardrobe.height,
+      wardrobe.carcassHeight,
+    );
+
+    set({
+      bays: nextBays,
+      modules: nextModules,
       selectedBayId: bayId,
       selectedModuleId: id,
     });
@@ -450,9 +521,14 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
       item.id === moduleId ? { ...item, y: finalY } : item,
     );
 
-    // Rail move: re-space shelves for hang / above-rail rules.
-    // Shelf / drawer drags stay where the user put them (use Even below).
+    // Rail move: snap back to fixed 50 / +900 positions, then re-space shelves
     if (target.type === "hanging-rail") {
+      nextModules = syncBayRailPositions(
+        nextModules,
+        target.bayId,
+        wardrobe.height,
+        wardrobe.carcassHeight,
+      );
       nextModules = redistributeShelvesEvenly(
         nextModules,
         target.bayId,
@@ -492,28 +568,23 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
 
     const drawerCount = clampDrawerCount(count);
     const height = drawerPackHeight(drawerCount);
-    const resized: Module = { ...target, drawerCount, height };
-    const bayModules = modules.map((item) =>
+    // Grow / shrink on the floor; shelves re-space (extras drop if needed)
+    const y = Math.max(0, wardrobe.height - height);
+    const resized: Module = { ...target, drawerCount, height, y };
+
+    const nextModules = modules.map((item) =>
       item.id === moduleId ? resized : item,
     );
-    const peers = bayModules.filter((mod) => mod.bayId === target.bayId);
-    // Keep drawers on the floor when resizing if they were near it
-    const preferFloor =
-      target.y >= wardrobe.height - target.height - SNAP_INCREMENT_MM * 2;
-    const y = preferFloor
-      ? resolveFloorY(resized, peers, wardrobe.height)
-      : resolveModuleY(
-          resized,
-          target.y,
-          peers,
-          wardrobe.height,
-          bayModules,
-          wardrobe.carcassHeight,
-        );
 
     set({
-      modules: modules.map((item) =>
-        item.id === moduleId ? { ...resized, y } : item,
+      modules: redistributeShelvesEvenly(
+        nextModules,
+        target.bayId,
+        wardrobe.height,
+        {
+          forceEven: true,
+          carcassHeight: wardrobe.carcassHeight,
+        },
       ),
       selectedModuleId: moduleId,
     });
@@ -540,20 +611,30 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
         }
       }
 
+      let nextModules = remaining;
+      if (target) {
+        if (target.type === "hanging-rail") {
+          nextModules = syncBayRailPositions(
+            remaining,
+            target.bayId,
+            state.wardrobe.height,
+            state.wardrobe.carcassHeight,
+          );
+        }
+        nextModules = redistributeShelvesEvenly(
+          nextModules,
+          target.bayId,
+          state.wardrobe.height,
+          {
+            forceEven: true,
+            carcassHeight: state.wardrobe.carcassHeight,
+          },
+        );
+      }
+
       return {
         bays: nextBays,
-        modules:
-          target?.type === "shelf"
-            ? redistributeShelvesEvenly(
-                remaining,
-                target.bayId,
-                state.wardrobe.height,
-                {
-                  forceEven: true,
-                  carcassHeight: state.wardrobe.carcassHeight,
-                },
-              )
-            : remaining,
+        modules: nextModules,
         selectedModuleId:
           state.selectedModuleId === moduleId ? null : state.selectedModuleId,
       };

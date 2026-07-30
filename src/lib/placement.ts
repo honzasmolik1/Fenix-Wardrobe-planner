@@ -1,7 +1,11 @@
 import {
+  DUAL_RAIL_SPACING_MM,
   JACKET_CLEARANCE_MM,
+  MAX_RAILS_PER_BAY,
   MODULE_CLEARANCE_MM,
   MODULE_HEIGHTS,
+  DRAG_SNAP_MM,
+  RAIL_FROM_TOP_MM,
   SHELF_ABOVE_RAIL_GAP_MM,
   SNAP_INCREMENT_MM,
   mainZoneTop,
@@ -101,21 +105,24 @@ function floorY(height: number, wardrobeHeight: number): number {
 }
 
 /**
- * Snap to system 32, but keep flush-to-floor when near the bottom.
+ * Snap to a grid (default 10 mm for manual drag), but keep flush-to-floor
+ * when near the bottom.
  */
 function snapY(
   y: number,
   height: number,
   wardrobeHeight: number,
+  increment: number = DRAG_SNAP_MM,
 ): number {
   const maxY = floorY(height, wardrobeHeight);
+  const step = Math.max(1, increment);
 
   // Generous floor magnet — drawers were getting stuck floating
-  if (y >= maxY - SNAP_INCREMENT_MM * 3) {
+  if (y >= maxY - step * 3) {
     return maxY;
   }
 
-  const snapped = Math.round(y / SNAP_INCREMENT_MM) * SNAP_INCREMENT_MM;
+  const snapped = Math.round(y / step) * step;
   return Math.min(Math.max(0, snapped), maxY);
 }
 
@@ -164,11 +171,19 @@ function evenShelfPositions(
     );
   }
 
-  // Equal air gaps: above first, between, and below last (to drawers / floor)
+  // Equal air gaps, then snap each shelf so the gap above zone/start is on 10 mm
   const gap = (spanHeight - totalShelfHeight) / (count + 1);
-  return Array.from({ length: count }, (_, index) =>
-    Math.round(span.start + gap * (index + 1) + shelfHeight * index),
-  );
+  return Array.from({ length: count }, (_, index) => {
+    const raw = span.start + gap * (index + 1) + shelfHeight * index;
+    const gapAbove = raw - span.start;
+    const snappedGap =
+      Math.round(gapAbove / DRAG_SNAP_MM) * DRAG_SNAP_MM;
+    const y = span.start + Math.max(0, snappedGap);
+    return Math.min(
+      Math.max(span.start, y),
+      Math.max(span.start, span.end - shelfHeight),
+    );
+  });
 }
 
 /** Unique shelf Y lines used anywhere in the wardrobe (keeps bays visually aligned). */
@@ -208,8 +223,17 @@ function overlaps(y: number, height: number, other: Module): boolean {
   return a0 < b1 && a1 > b0;
 }
 
+/** Body overlap only — used so 10 mm shelf snaps aren't blocked by clearance. */
+function overlapsBody(y: number, height: number, other: Module): boolean {
+  return y < other.y + other.height && y + height > other.y;
+}
+
 function isFree(y: number, height: number, others: Module[]): boolean {
   return others.every((mod) => !overlaps(y, height, mod));
+}
+
+function isBodyFree(y: number, height: number, others: Module[]): boolean {
+  return others.every((mod) => !overlapsBody(y, height, mod));
 }
 
 /** Top storage above the construction shelf is not an adjustable shelf zone. */
@@ -257,7 +281,8 @@ function shelfPlacementSpan(
  * Shelves around a hanging rail:
  * — first shelf above sits SHELF_ABOVE_RAIL_GAP_MM above the rail; extras
  *   fill evenly up to the construction line
- * — shelves below start JACKET_CLEARANCE_MM under the rail, then even to floor
+ * — first shelf below sits exactly JACKET_CLEARANCE_MM under the rail;
+ *   further shelves are evenly spaced from that shelf down to the floor
  */
 function shelfYsAroundRail(
   rail: Module,
@@ -271,6 +296,7 @@ function shelfYsAroundRail(
 
   const zoneTop = mainZoneTop(wardrobeHeight, carcassHeight);
   const firstAboveY = rail.y - SHELF_ABOVE_RAIL_GAP_MM - shelfHeight;
+  // Fixed hang zone: first shelf below starts 900 mm under the rail
   const belowStartY = rail.y + rail.height + JACKET_CLEARANCE_MM;
 
   const drawers = otherObstacles.filter((mod) => mod.type === "drawer-pack");
@@ -283,8 +309,7 @@ function shelfYsAroundRail(
     firstAboveY >= zoneTop &&
     firstAboveY + shelfHeight <= rail.y - SHELF_ABOVE_RAIL_GAP_MM + 0.5;
 
-  // Prefer filling above first (user asked for shelves above the rail),
-  // then place leftovers below the 1000 mm hang zone.
+  // Prefer filling above first when there is room, then hang zone + even below
   let aboveCount = 0;
   if (canPlaceAbove) {
     const aboveSpanHeight = Math.max(0, firstAboveY + shelfHeight - zoneTop);
@@ -316,21 +341,24 @@ function shelfYsAroundRail(
   }
 
   if (belowCount > 0 && belowStartY + shelfHeight <= zoneBottom) {
-    const belowSpan: Span = {
-      start: belowStartY,
-      end: zoneBottom,
-    };
-    if (belowCount === 1) {
-      positions.push(
-        Math.min(
-          Math.round(belowStartY),
-          Math.max(belowStartY, zoneBottom - shelfHeight),
-        ),
-      );
-    } else {
-      positions.push(
-        ...evenShelfPositions(belowSpan, belowCount, shelfHeight),
-      );
+    const firstBelow = Math.min(
+      Math.round(belowStartY),
+      Math.max(belowStartY, zoneBottom - shelfHeight),
+    );
+    // First shelf locks to the 900 mm hang mark under the rail
+    positions.push(firstBelow);
+
+    if (belowCount > 1) {
+      // Remaining shelves evenly fill the pocket under that first shelf
+      const restSpan: Span = {
+        start: firstBelow + shelfHeight,
+        end: zoneBottom,
+      };
+      if (restSpan.end - restSpan.start >= shelfHeight) {
+        positions.push(
+          ...evenShelfPositions(restSpan, belowCount - 1, shelfHeight),
+        );
+      }
     }
   } else if (belowCount > 0 && canPlaceAbove) {
     // Not enough room below — pack remaining above if possible
@@ -353,7 +381,7 @@ function shelfYsAroundRail(
 
 /**
  * Re-space shelves in a bay inside the main carcass only (below construction
- * shelf). With a hanging rail, uses 100 mm above / 1000 mm hang rules.
+ * shelf). With a hanging rail, uses 100 mm above / 900 mm hang rules.
  */
 export function redistributeShelvesEvenly(
   modules: Module[],
@@ -378,7 +406,14 @@ export function redistributeShelvesEvenly(
 
   let positions: number[];
 
-  if (rails.length > 0) {
+  // Double hang fills the bay — no shelves allowed with 2 rails
+  if (rails.length >= 2) {
+    return modules.filter(
+      (mod) => !(mod.bayId === bayId && mod.type === "shelf"),
+    );
+  }
+
+  if (rails.length === 1) {
     // Use the topmost rail as the hang reference in this bay
     const rail = rails[0];
     const otherObstacles = obstacles.filter((mod) => mod.id !== rail.id);
@@ -408,9 +443,14 @@ export function redistributeShelvesEvenly(
     const count = shelves.length;
     const placeCount = canFitShelves(span, count, shelfHeight)
       ? count
-      : Math.max(1, Math.floor((span.end - span.start) / Math.max(shelfHeight, 1)));
+      : Math.max(
+          0,
+          Math.floor((span.end - span.start) / Math.max(shelfHeight, 1)),
+        );
 
-    if (options.forceEven) {
+    if (placeCount === 0) {
+      positions = [];
+    } else if (options.forceEven) {
       positions = evenShelfPositions(span, placeCount, shelfHeight);
     } else {
       const globalLines = globalShelfLines(modules, {
@@ -502,22 +542,19 @@ export function reconcileModulesForCarcassHeight(
           }
         }
       } else {
-        // Hanging rail — slide down under the construction line
-        for (let y = zoneTop; y <= maxY; y += SNAP_INCREMENT_MM) {
-          if (!isFree(y, mod.height, others)) continue;
-          // Prefer a slot that still leaves jacket clearance under the rail
-          let obstacle = wardrobeHeight;
-          for (const other of others) {
-            if (other.y >= y + mod.height) {
-              obstacle = Math.min(obstacle, other.y);
-            }
-          }
-          const clearBelow = obstacle - (y + mod.height);
-          if (clearBelow >= JACKET_CLEARANCE_MM) {
-            placed = y;
-            break;
-          }
-          if (placed === null) placed = y;
+        // Hanging rail — lock to canonical 50 mm / +900 mm positions
+        const bayRails = result.filter(
+          (item) =>
+            item.bayId === bayId && item.type === "hanging-rail",
+        );
+        if (bayRails.some((item) => item.id === mod.id)) {
+          result = syncBayRailPositions(
+            result,
+            bayId,
+            wardrobeHeight,
+            carcassHeight,
+          );
+          placed = result.find((item) => item.id === mod.id)?.y ?? null;
         }
       }
 
@@ -535,10 +572,31 @@ export function reconcileModulesForCarcassHeight(
       (mod) =>
         !(mod.bayId === bayId && mod.type === "shelf" && mod.y < zoneTop),
     );
-    result = redistributeShelvesEvenly(result, bayId, wardrobeHeight, {
-      forceEven: true,
+    // Rails always snap to 50 mm / +900 mm as the construction line moves
+    result = syncBayRailPositions(
+      result,
+      bayId,
+      wardrobeHeight,
       carcassHeight,
-    });
+    );
+    // Double hang: strip shelves (and any drawers that slipped in)
+    const bayRails = result.filter(
+      (mod) => mod.bayId === bayId && mod.type === "hanging-rail",
+    );
+    if (bayRails.length >= MAX_RAILS_PER_BAY) {
+      result = result.filter(
+        (mod) =>
+          !(
+            mod.bayId === bayId &&
+            (mod.type === "shelf" || mod.type === "drawer-pack")
+          ),
+      );
+    } else {
+      result = redistributeShelvesEvenly(result, bayId, wardrobeHeight, {
+        forceEven: true,
+        carcassHeight,
+      });
+    }
   }
 
   return result;
@@ -557,12 +615,68 @@ export function evenSpaceShelvesInBay(
   });
 }
 
+/** True when a bay already has two hanging rails (double hang). */
+export function bayHasDualRails(bayModules: Module[]): boolean {
+  return (
+    bayModules.filter((mod) => mod.type === "hanging-rail").length >=
+    MAX_RAILS_PER_BAY
+  );
+}
+
+/**
+ * Fixed rail Y positions in the main carcass:
+ * — 1st rail: RAIL_FROM_TOP_MM below the construction underside
+ * — 2nd rail: DUAL_RAIL_SPACING_MM clear air below the first (underside → top)
+ */
+export function canonicalRailYs(
+  count: number,
+  wardrobeHeight: number,
+  carcassHeight = 2000,
+): number[] {
+  const railH = MODULE_HEIGHTS["hanging-rail"];
+  const zoneTop = mainZoneTop(wardrobeHeight, carcassHeight);
+  const firstY = zoneTop + RAIL_FROM_TOP_MM;
+  if (count <= 0) return [];
+  if (firstY + railH > wardrobeHeight) return [];
+  if (count === 1) return [firstY];
+
+  const secondY = firstY + railH + DUAL_RAIL_SPACING_MM;
+  if (secondY + railH > wardrobeHeight) return [firstY];
+  return [firstY, secondY];
+}
+
+/** Snap every hanging rail in a bay onto the canonical double/single positions. */
+export function syncBayRailPositions(
+  modules: Module[],
+  bayId: string,
+  wardrobeHeight: number,
+  carcassHeight = 2000,
+): Module[] {
+  const rails = modules
+    .filter((mod) => mod.bayId === bayId && mod.type === "hanging-rail")
+    .sort((a, b) => a.y - b.y);
+  if (rails.length === 0) return modules;
+
+  const ys = canonicalRailYs(rails.length, wardrobeHeight, carcassHeight);
+  if (ys.length === 0) return modules;
+
+  const yById = new Map(
+    rails.map((rail, index) => [rail.id, ys[index] ?? rail.y]),
+  );
+  return modules.map((mod) => {
+    const y = yById.get(mod.id);
+    return y === undefined ? mod : { ...mod, y };
+  });
+}
+
 /** Returns false when there is no free pocket left for another shelf. */
 export function canAddShelf(
   bayModules: Module[],
   wardrobeHeight: number,
   carcassHeight = 2000,
 ): boolean {
+  if (bayHasDualRails(bayModules)) return false;
+
   const shelfHeight = MODULE_HEIGHTS.shelf;
   const nextCount =
     bayModules.filter((mod) => mod.type === "shelf").length + 1;
@@ -571,6 +685,24 @@ export function canAddShelf(
     reserveJacketSpace: true,
   });
   return free.some((span) => canFitShelves(span, nextCount, shelfHeight));
+}
+
+/** Drawers are not allowed in a double-hang (2-rail) bay. */
+export function canAddDrawer(bayModules: Module[]): boolean {
+  return !bayHasDualRails(bayModules);
+}
+
+export function canAddRail(
+  bayModules: Module[],
+  wardrobeHeight: number,
+  carcassHeight = 2000,
+): boolean {
+  const existing = bayModules.filter(
+    (mod) => mod.type === "hanging-rail",
+  ).length;
+  if (existing >= MAX_RAILS_PER_BAY) return false;
+  const ys = canonicalRailYs(existing + 1, wardrobeHeight, carcassHeight);
+  return ys.length > existing;
 }
 
 /**
@@ -643,61 +775,105 @@ export function findDrawerPlacementY(
 export function findHangingRailPlacementY(
   bayModules: Module[],
   wardrobeHeight: number,
+  carcassHeight = 2000,
 ): number | null {
-  const height = MODULE_HEIGHTS["hanging-rail"];
-  const blocked = blockedForPlacement(bayModules, wardrobeHeight, {
-    reserveJacketSpace: false,
-  });
-  const free = freeSpans(blocked, wardrobeHeight).filter((span) =>
-    fitsInSpan(span, height),
-  );
-  if (free.length === 0) return null;
+  const existing = bayModules.filter(
+    (mod) => mod.type === "hanging-rail",
+  ).length;
+  if (existing >= MAX_RAILS_PER_BAY) return null;
+  const ys = canonicalRailYs(existing + 1, wardrobeHeight, carcassHeight);
+  if (ys.length <= existing) return null;
+  return ys[existing] ?? null;
+}
 
-  let bestY: number | null = null;
-  let bestScore = -Infinity;
+/**
+ * Snap a dragged shelf onto a 10 mm gap grid.
+ * — Bottom shelf (nothing below): gap from the wardrobe floor is 10 mm steps
+ * — Otherwise: gap from the zone top / fitting above is 10 mm steps
+ */
+function snapShelfDragY(
+  desiredY: number,
+  height: number,
+  others: Module[],
+  wardrobeHeight: number,
+  zoneTop: number,
+): number {
+  const maxY = floorY(height, wardrobeHeight);
+  const mid = desiredY + height / 2;
+  let upperEnd = zoneTop;
+  let lowerStart = wardrobeHeight;
 
-  for (const span of free) {
-    const minY = span.start;
-    const maxY = span.end - height;
-
-    for (let y = minY; y <= maxY; y += SNAP_INCREMENT_MM) {
-      const underside = y + height;
-
-      let obstacle = wardrobeHeight;
-      for (const mod of bayModules) {
-        if (mod.y >= underside) {
-          obstacle = Math.min(obstacle, mod.y);
-        }
-      }
-      const clearBelow = obstacle - underside;
-
-      let score = 0;
-      if (clearBelow >= JACKET_CLEARANCE_MM) {
-        score += 1000 + clearBelow;
-        const spaceAbove = y - span.start;
-        if (spaceAbove >= MODULE_HEIGHTS.shelf + MODULE_CLEARANCE_MM) {
-          score += 200 + spaceAbove;
-        }
-      } else {
-        score += clearBelow;
-      }
-
-      score -= Math.abs(y - wardrobeHeight * 0.2) * 0.05;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestY = snapY(y, height, wardrobeHeight);
-      }
+  for (const mod of others) {
+    const bottom = mod.y + mod.height;
+    if (bottom <= mid + 0.5) {
+      upperEnd = Math.max(upperEnd, bottom);
+    }
+    if (mod.y >= mid - 0.5) {
+      lowerStart = Math.min(lowerStart, mod.y);
     }
   }
 
-  return bestY;
+  const isBottomShelf = lowerStart >= wardrobeHeight - 0.5;
+
+  if (isBottomShelf) {
+    // Snap clear air under the shelf to the floor: 300, 310, 320, …
+    const rawGapBelow = wardrobeHeight - (desiredY + height);
+    let snappedGapBelow =
+      Math.round(rawGapBelow / DRAG_SNAP_MM) * DRAG_SNAP_MM;
+    snappedGapBelow = Math.max(0, snappedGapBelow);
+
+    let y = wardrobeHeight - height - snappedGapBelow;
+    y = Math.min(maxY, Math.max(zoneTop, y));
+
+    // Keep clear of whatever sits above
+    if (y < upperEnd) {
+      const maxGapBelow =
+        Math.floor((wardrobeHeight - height - upperEnd) / DRAG_SNAP_MM) *
+        DRAG_SNAP_MM;
+      y = wardrobeHeight - height - Math.max(0, maxGapBelow);
+      y = Math.min(maxY, Math.max(zoneTop, y));
+    }
+
+    return y;
+  }
+
+  // Not the bottom shelf — snap the gap above (300, 310, …)
+  const rawGap = desiredY - upperEnd;
+  let snappedGap = Math.round(rawGap / DRAG_SNAP_MM) * DRAG_SNAP_MM;
+  snappedGap = Math.max(0, snappedGap);
+
+  let y = upperEnd + snappedGap;
+  const maxFit = lowerStart - height;
+  if (y > maxFit) {
+    const maxGap =
+      Math.floor((maxFit - upperEnd) / DRAG_SNAP_MM) * DRAG_SNAP_MM;
+    y = upperEnd + Math.max(0, maxGap);
+  }
+
+  return Math.min(maxY, Math.max(zoneTop, y));
+}
+
+/** @deprecated kept for non-shelf fittings that still snap by gap-above */
+function snapDragByGapAbove(
+  desiredY: number,
+  height: number,
+  others: Module[],
+  wardrobeHeight: number,
+  zoneTop: number,
+): number {
+  return snapShelfDragY(
+    desiredY,
+    height,
+    others,
+    wardrobeHeight,
+    zoneTop,
+  );
 }
 
 /**
  * Snap + push a dragged module out of collisions.
  * Drawer packs strongly magnet to the floor.
- * Shelves snap onto global alignment lines from other bays.
+ * Manual drag snaps clearances to 10 mm.
  */
 export function resolveModuleY(
   target: Module,
@@ -707,31 +883,33 @@ export function resolveModuleY(
   allModules?: Module[],
   carcassHeight = 2000,
 ): number {
+  void allModules;
   const maxY = floorY(target.height, wardrobeHeight);
   const others = bayModules.filter((mod) => mod.id !== target.id);
   const clampedDesired = Math.min(Math.max(0, desiredY), maxY);
+  const step = DRAG_SNAP_MM;
+  const zoneTop = mainZoneTop(wardrobeHeight, carcassHeight);
 
   // --- Drawer packs: always allow returning flush to the floor ---
   if (target.type === "drawer-pack") {
     const floorFree = isFree(maxY, target.height, others);
     const dragDown = clampedDesired >= target.y - 1;
-    const nearFloor = clampedDesired >= maxY - SNAP_INCREMENT_MM * 4;
+    const nearFloor = clampedDesired >= maxY - step * 4;
     const lowerHalf = clampedDesired >= maxY * 0.35;
 
     if (floorFree && (nearFloor || (dragDown && lowerHalf))) {
       return maxY;
     }
 
-    if (floorFree && clampedDesired >= maxY - SNAP_INCREMENT_MM * 6) {
+    if (floorFree && clampedDesired >= maxY - step * 6) {
       return maxY;
     }
   }
 
-  // --- Shelves: keep 100 mm above rails / 1000 mm hang clearance below ---
+  // --- Shelves: 10 mm grid — bottom shelf from floor, others from above ---
   if (target.type === "shelf") {
     const rails = others.filter((mod) => mod.type === "hanging-rail");
     let constrained = clampedDesired;
-    const zoneTop = mainZoneTop(wardrobeHeight, carcassHeight);
 
     for (const rail of rails) {
       const maxAbove =
@@ -740,51 +918,79 @@ export function resolveModuleY(
       const railMid = rail.y + rail.height / 2;
 
       if (constrained + target.height / 2 <= railMid) {
-        // Placing / dragging above the rail
         constrained = Math.min(constrained, maxAbove);
         constrained = Math.max(constrained, zoneTop);
       } else {
-        // Placing / dragging below — first legal shelf starts 1 m under rail
         constrained = Math.max(constrained, minBelow);
       }
     }
 
-    if (allModules) {
-      const lines = globalShelfLines(allModules, { ignoreId: target.id });
-      const aligned = nearestLine(constrained, lines);
-      if (
-        aligned !== null &&
-        Math.abs(aligned - constrained) <= SNAP_INCREMENT_MM * 2 &&
-        aligned <= maxY &&
-        isFree(aligned, target.height, others)
-      ) {
-        // Only accept alignment if it still respects rail clearances
-        const ok = rails.every((rail) => {
-          const shelfBottom = aligned + target.height;
-          const aboveOk =
-            shelfBottom <= rail.y - SHELF_ABOVE_RAIL_GAP_MM + 0.5;
-          const belowOk =
-            aligned >= rail.y + rail.height + JACKET_CLEARANCE_MM - 0.5;
-          return aboveOk || belowOk;
-        });
-        if (ok || rails.length === 0) return aligned;
+    const snapped = snapShelfDragY(
+      constrained,
+      target.height,
+      others,
+      wardrobeHeight,
+      zoneTop,
+    );
+    if (isBodyFree(snapped, target.height, others)) {
+      return snapped;
+    }
+
+    // Walk the 10 mm gap ladder until a free slot is found
+    for (let delta = step; delta <= wardrobeHeight; delta += step) {
+      for (const candidate of [constrained + delta, constrained - delta]) {
+        const next = snapShelfDragY(
+          candidate,
+          target.height,
+          others,
+          wardrobeHeight,
+          zoneTop,
+        );
+        if (
+          next >= zoneTop &&
+          next <= maxY &&
+          isBodyFree(next, target.height, others)
+        ) {
+          return next;
+        }
       }
     }
 
-    const snapped = snapY(constrained, target.height, wardrobeHeight);
-    if (isFree(snapped, target.height, others)) {
-      return snapped;
+    return snapShelfDragY(
+      target.y,
+      target.height,
+      others,
+      wardrobeHeight,
+      zoneTop,
+    );
+  }
+
+  // Rails are fixed: 50 mm from top, +900 mm for the second
+  if (target.type === "hanging-rail") {
+    const rails = [target, ...others.filter((mod) => mod.type === "hanging-rail")]
+      .sort((a, b) => a.y - b.y);
+    const ys = canonicalRailYs(rails.length, wardrobeHeight, carcassHeight);
+    const index = rails.findIndex((mod) => mod.id === target.id);
+    if (index >= 0 && ys[index] !== undefined) {
+      return ys[index];
     }
+    return Math.max(zoneTop + RAIL_FROM_TOP_MM, zoneTop);
   }
 
   if (
-    clampedDesired >= maxY - SNAP_INCREMENT_MM * 3 &&
+    clampedDesired >= maxY - step * 3 &&
     isFree(maxY, target.height, others)
   ) {
     return maxY;
   }
 
-  const y = snapY(clampedDesired, target.height, wardrobeHeight);
+  const y = snapDragByGapAbove(
+    clampedDesired,
+    target.height,
+    others,
+    wardrobeHeight,
+    zoneTop,
+  );
   if (isFree(y, target.height, others)) {
     return y;
   }
@@ -793,32 +999,30 @@ export function resolveModuleY(
     return maxY;
   }
 
-  // Prefer searching downward first when the user is dragging down
-  const preferDown = clampedDesired >= target.y;
-
-  for (
-    let delta = SNAP_INCREMENT_MM;
-    delta <= wardrobeHeight;
-    delta += SNAP_INCREMENT_MM
-  ) {
-    const first = preferDown
-      ? snapY(clampedDesired + delta, target.height, wardrobeHeight)
-      : snapY(clampedDesired - delta, target.height, wardrobeHeight);
-    const second = preferDown
-      ? snapY(clampedDesired - delta, target.height, wardrobeHeight)
-      : snapY(clampedDesired + delta, target.height, wardrobeHeight);
-
-    if (first >= 0 && first <= maxY && isFree(first, target.height, others)) {
-      return first;
+  // Nudge in 10 mm gap steps until a free slot is found
+  let delta = step;
+  while (delta <= wardrobeHeight) {
+    for (const candidate of [clampedDesired + delta, clampedDesired - delta]) {
+      const snapped = snapDragByGapAbove(
+        candidate,
+        target.height,
+        others,
+        wardrobeHeight,
+        zoneTop,
+      );
+      if (
+        snapped >= 0 &&
+        snapped <= maxY &&
+        isFree(snapped, target.height, others)
+      ) {
+        return snapped;
+      }
     }
-    if (second >= 0 && second <= maxY && isFree(second, target.height, others)) {
-      return second;
-    }
+    delta += step;
   }
 
   if (isFree(maxY, target.height, others)) return maxY;
-
-  return Math.min(Math.max(0, target.y), maxY);
+  return target.y;
 }
 
 /** Force a module (usually drawers) flush to the wardrobe floor if free. */

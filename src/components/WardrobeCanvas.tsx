@@ -6,12 +6,15 @@ import type Konva from "konva";
 import {
   CARCASS_SNAP_MM,
   CONSTRUCTION_SHELF_HEIGHT_MM,
+  DRAWER_BAY_WIDTH_MM,
   MIN_CARCASS_HEIGHT_MM,
   MIN_TOP_BOX_MM,
   constructionShelfY,
   mainZoneTop,
 } from "@/lib/constants";
 import { calculateGapsInZone } from "@/lib/gaps";
+import { resolveModuleY } from "@/lib/placement";
+import { resizeBaysPreservingLocks } from "@/lib/standardLayout";
 import {
   type Module,
   type ModuleType,
@@ -20,7 +23,7 @@ import {
 
 /** Space around the carcass for dimension labels (must fit full height/width text) */
 const DIM_LEFT = 92;
-const DIM_RIGHT = 18;
+const DIM_RIGHT = 88;
 const DIM_TOP = 42;
 const DIM_BOTTOM = 68;
 /** Extra margin so the drawing sits a bit off the screen/PDF edges */
@@ -96,12 +99,31 @@ function ModuleShape({
       ref={groupRef}
       x={inset}
       y={mod.y * scale}
-      draggable
+      draggable={mod.type !== "hanging-rail"}
       dragBoundFunc={(pos) => {
         const maxY = Math.max(0, wardrobeHeight * scale - heightPx);
+        let nextY = Math.min(Math.max(0, pos.y), maxY);
+
+        // Shelves click onto a 10 mm gap grid while dragging
+        if (mod.type === "shelf") {
+          const state = useWardrobeStore.getState();
+          const bayModules = state.modules.filter(
+            (item) => item.bayId === mod.bayId,
+          );
+          const snappedMm = resolveModuleY(
+            mod,
+            nextY / scale,
+            bayModules,
+            state.wardrobe.height,
+            state.modules,
+            state.wardrobe.carcassHeight,
+          );
+          nextY = Math.min(maxY, Math.max(0, snappedMm * scale));
+        }
+
         return {
           x: inset,
-          y: Math.min(Math.max(0, pos.y), maxY),
+          y: nextY,
         };
       }}
       onMouseDown={(event) => {
@@ -138,7 +160,10 @@ function ModuleShape({
       }}
       onMouseEnter={(event) => {
         const stage = event.target.getStage();
-        if (stage) stage.container().style.cursor = "ns-resize";
+        if (stage) {
+          stage.container().style.cursor =
+            mod.type === "hanging-rail" ? "pointer" : "ns-resize";
+        }
       }}
       onMouseLeave={(event) => {
         const stage = event.target.getStage();
@@ -488,9 +513,13 @@ export function WardrobeCanvas() {
   const modules = useWardrobeStore((state) => state.modules);
   const selectedBayId = useWardrobeStore((state) => state.selectedBayId);
   const selectedModuleId = useWardrobeStore((state) => state.selectedModuleId);
+  const canvasHighlight = useWardrobeStore((state) => state.canvasHighlight);
   const materials = useWardrobeStore((state) => state.materials);
   const selectBay = useWardrobeStore((state) => state.selectBay);
   const selectModule = useWardrobeStore((state) => state.selectModule);
+  const clearCanvasHighlight = useWardrobeStore(
+    (state) => state.clearCanvasHighlight,
+  );
   const updateModuleY = useWardrobeStore((state) => state.updateModuleY);
   const setCarcassHeight = useWardrobeStore((state) => state.setCarcassHeight);
   const constructDragRef = useRef(false);
@@ -502,14 +531,36 @@ export function WardrobeCanvas() {
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      setSize({
-        width: entry.contentRect.width,
-        height: entry.contentRect.height,
+      const nextWidth = Math.round(entry.contentRect.width);
+      const nextHeight = Math.round(entry.contentRect.height);
+      setSize((prev) => {
+        if (
+          Math.abs(prev.width - nextWidth) < 2 &&
+          Math.abs(prev.height - nextHeight) < 2
+        ) {
+          return prev;
+        }
+        return { width: nextWidth, height: nextHeight };
       });
     });
 
     observer.observe(element);
     return () => observer.disconnect();
+  }, []);
+
+  // Keep drawer bay locked at the current fixed width (500 mm)
+  useEffect(() => {
+    const { wardrobe, bays } = useWardrobeStore.getState();
+    const needsFix = bays.some(
+      (bay) =>
+        Boolean(bay.lockedWidth) &&
+        (bay.lockedWidth !== DRAWER_BAY_WIDTH_MM ||
+          bay.width !== DRAWER_BAY_WIDTH_MM),
+    );
+    if (!needsFix) return;
+    useWardrobeStore.setState({
+      bays: resizeBaysPreservingLocks(bays, wardrobe.width),
+    });
   }, []);
 
   // Prevent page scroll from stealing tablet finger drags on the canvas
@@ -560,11 +611,25 @@ export function WardrobeCanvas() {
   const mainTopPx = constructYpx + constructHpx;
   const zoneTopMm = mainZoneTop(wardrobe.height, carcassHeight);
   const dimColor = "#8d6b45";
+  const sortedBays = useMemo(
+    () => [...bays].sort((a, b) => a.index - b.index),
+    [bays],
+  );
 
   return (
     <div
       ref={containerRef}
       className="flex h-full w-full items-center justify-center bg-white"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          clearCanvasHighlight();
+        }
+      }}
+      onTouchStart={(event) => {
+        if (event.target === event.currentTarget) {
+          clearCanvasHighlight();
+        }
+      }}
     >
       <Stage
         ref={stageRef}
@@ -573,14 +638,15 @@ export function WardrobeCanvas() {
         className="wardrobe-stage"
       >
         <Layer>
-          {/* Clean white page — wardrobe only */}
+          {/* White page — tap outside the carcass to hide selection tint */}
           <Rect
             x={0}
             y={0}
             width={stageWidth}
             height={stageHeight}
             fill="#ffffff"
-            listening={false}
+            onMouseDown={() => clearCanvasHighlight()}
+            onTap={() => clearCanvasHighlight()}
           />
 
           <Group x={originX} y={originY}>
@@ -638,10 +704,11 @@ export function WardrobeCanvas() {
                 fill={interiorFill}
               />
 
-              {bays.map((bay, index) => {
-                const bayX = getBayOriginX(bays, index) * scale;
+              {sortedBays.map((bay, index) => {
+                const bayX = getBayOriginX(sortedBays, index) * scale;
                 const bayWidthPx = bay.width * scale;
-                const isSelected = bay.id === selectedBayId;
+                const isSelected =
+                  canvasHighlight && bay.id === selectedBayId;
                 const bayModules = modules.filter(
                   (mod) => mod.bayId === bay.id,
                 );
@@ -698,7 +765,9 @@ export function WardrobeCanvas() {
                         bayWidthPx={bayWidthPx}
                         scale={scale}
                         wardrobeHeight={wardrobe.height}
-                        selected={mod.id === selectedModuleId}
+                        selected={
+                          canvasHighlight && mod.id === selectedModuleId
+                        }
                         onSelect={selectModule}
                         onDragEnd={updateModuleY}
                       />
@@ -731,10 +800,10 @@ export function WardrobeCanvas() {
                 x={0}
                 y={constructYpx}
                 width={innerWidth}
-                height={Math.max(constructHpx, 10)}
+                height={Math.max(constructHpx, 2)}
                 fill={FRAME_COLOR}
                 draggable
-                hitStrokeWidth={36}
+                hitStrokeWidth={28}
                 dragBoundFunc={(pos) => {
                   const absX = originX + boardPx;
                   const absOriginY = originY + boardPx;
@@ -898,8 +967,8 @@ export function WardrobeCanvas() {
             </Group>
 
             {/* Bay widths — outside, above the wardrobe (adapts to bay count / sizes) */}
-            {bays.map((bay, index) => {
-              const bayX = boardPx + getBayOriginX(bays, index) * scale;
+            {sortedBays.map((bay, index) => {
+              const bayX = boardPx + getBayOriginX(sortedBays, index) * scale;
               const bayWidthPx = bay.width * scale;
               return (
                 <Group key={`bay-w-${bay.id}`} listening={false}>
@@ -979,6 +1048,7 @@ export function WardrobeCanvas() {
               listening={false}
             />
 
+            {/* Left — full wardrobe height (e.g. 2400 mm) */}
             <Line
               points={[-34, 0, -34, outerHeight]}
               stroke={dimColor}
@@ -989,16 +1059,6 @@ export function WardrobeCanvas() {
               points={[-40, outerHeight, -28, outerHeight]}
               stroke={dimColor}
               strokeWidth={1.5}
-            />
-            <Line
-              points={[
-                -40,
-                boardPx + constructYpx,
-                -28,
-                boardPx + constructYpx,
-              ]}
-              stroke={FRAME_COLOR}
-              strokeWidth={2}
             />
             <Text
               x={-88}
@@ -1021,6 +1081,85 @@ export function WardrobeCanvas() {
               fill="#6d7380"
               listening={false}
             />
+
+            {/* Right — top long bay + main carcass below */}
+            {(() => {
+              const rightX = outerWidth + 34;
+              const topEnd = boardPx + constructYpx;
+              const topBoxMm = Math.max(
+                0,
+                wardrobe.height - carcassHeight,
+              );
+              const topMidY = topEnd / 2;
+              const bottomMidY = topEnd + (outerHeight - topEnd) / 2;
+              return (
+                <Group listening={false}>
+                  <Line
+                    points={[rightX, 0, rightX, outerHeight]}
+                    stroke={dimColor}
+                    strokeWidth={1.5}
+                  />
+                  <Line
+                    points={[rightX - 6, 0, rightX + 6, 0]}
+                    stroke={dimColor}
+                    strokeWidth={1.5}
+                  />
+                  <Line
+                    points={[rightX - 6, topEnd, rightX + 6, topEnd]}
+                    stroke={FRAME_COLOR}
+                    strokeWidth={2}
+                  />
+                  <Line
+                    points={[
+                      rightX - 6,
+                      outerHeight,
+                      rightX + 6,
+                      outerHeight,
+                    ]}
+                    stroke={dimColor}
+                    strokeWidth={1.5}
+                  />
+                  <Text
+                    x={rightX + 10}
+                    y={Math.max(2, topMidY - 12)}
+                    width={56}
+                    align="left"
+                    text={`${topBoxMm}`}
+                    fontSize={13}
+                    fill={FRAME_COLOR}
+                    fontStyle="bold"
+                  />
+                  <Text
+                    x={rightX + 10}
+                    y={Math.max(16, topMidY + 4)}
+                    width={56}
+                    align="left"
+                    text="mm"
+                    fontSize={11}
+                    fill="#6d7380"
+                  />
+                  <Text
+                    x={rightX + 10}
+                    y={bottomMidY - 12}
+                    width={56}
+                    align="left"
+                    text={`${carcassHeight}`}
+                    fontSize={13}
+                    fill={FRAME_COLOR}
+                    fontStyle="bold"
+                  />
+                  <Text
+                    x={rightX + 10}
+                    y={bottomMidY + 4}
+                    width={56}
+                    align="left"
+                    text="mm"
+                    fontSize={11}
+                    fill="#6d7380"
+                  />
+                </Group>
+              );
+            })()}
           </Group>
         </Layer>
       </Stage>
