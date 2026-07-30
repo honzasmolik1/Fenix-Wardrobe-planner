@@ -437,18 +437,110 @@ export function redistributeShelvesEvenly(
     }
   }
 
-  if (positions.length === 0) return modules;
+  if (positions.length === 0) {
+    if (!options.forceEven) return modules;
+    // No room left under the construction line — drop this bay's shelves
+    return modules.filter(
+      (mod) => !(mod.bayId === bayId && mod.type === "shelf"),
+    );
+  }
 
   const zoneTop = mainZoneTop(wardrobeHeight, carcassHeight);
   const maxY = Math.max(zoneTop, wardrobeHeight - shelfHeight);
 
-  return modules.map((mod) => {
-    if (mod.bayId !== bayId || mod.type !== "shelf") return mod;
+  return modules.flatMap((mod) => {
+    if (mod.bayId !== bayId || mod.type !== "shelf") return [mod];
     const index = shelves.findIndex((shelf) => shelf.id === mod.id);
-    if (index < 0 || index >= positions.length) return mod;
+    if (index < 0 || index >= positions.length) {
+      return options.forceEven ? [] : [mod];
+    }
     const y = Math.min(Math.max(zoneTop, positions[index] ?? mod.y), maxY);
-    return { ...mod, y };
+    return [{ ...mod, y }];
   });
+}
+
+/**
+ * When the construction line moves down, push fittings into the main carcass
+ * or remove them if there is no free slot left.
+ */
+export function reconcileModulesForCarcassHeight(
+  modules: Module[],
+  bayIds: string[],
+  wardrobeHeight: number,
+  carcassHeight: number,
+): Module[] {
+  const zoneTop = mainZoneTop(wardrobeHeight, carcassHeight);
+  let result = modules.map((mod) => ({ ...mod }));
+
+  for (const bayId of bayIds) {
+    const offenders = result
+      .filter(
+        (mod) =>
+          mod.bayId === bayId &&
+          mod.type !== "shelf" &&
+          mod.y < zoneTop,
+      )
+      .sort((a, b) => a.y - b.y);
+
+    for (const mod of offenders) {
+      const others = result.filter(
+        (item) => item.bayId === bayId && item.id !== mod.id,
+      );
+      const maxY = Math.max(zoneTop, wardrobeHeight - mod.height);
+      let placed: number | null = null;
+
+      if (mod.type === "drawer-pack") {
+        if (isFree(maxY, mod.height, others) && maxY >= zoneTop) {
+          placed = maxY;
+        } else {
+          for (let y = maxY; y >= zoneTop; y -= SNAP_INCREMENT_MM) {
+            if (isFree(y, mod.height, others)) {
+              placed = y;
+              break;
+            }
+          }
+        }
+      } else {
+        // Hanging rail — slide down under the construction line
+        for (let y = zoneTop; y <= maxY; y += SNAP_INCREMENT_MM) {
+          if (!isFree(y, mod.height, others)) continue;
+          // Prefer a slot that still leaves jacket clearance under the rail
+          let obstacle = wardrobeHeight;
+          for (const other of others) {
+            if (other.y >= y + mod.height) {
+              obstacle = Math.min(obstacle, other.y);
+            }
+          }
+          const clearBelow = obstacle - (y + mod.height);
+          if (clearBelow >= JACKET_CLEARANCE_MM) {
+            placed = y;
+            break;
+          }
+          if (placed === null) placed = y;
+        }
+      }
+
+      if (placed === null) {
+        result = result.filter((item) => item.id !== mod.id);
+      } else {
+        result = result.map((item) =>
+          item.id === mod.id ? { ...item, y: placed } : item,
+        );
+      }
+    }
+
+    // Drop any shelves still sitting in the top box, then re-space
+    result = result.filter(
+      (mod) =>
+        !(mod.bayId === bayId && mod.type === "shelf" && mod.y < zoneTop),
+    );
+    result = redistributeShelvesEvenly(result, bayId, wardrobeHeight, {
+      forceEven: true,
+      carcassHeight,
+    });
+  }
+
+  return result;
 }
 
 /** Force evenly spaced shelves (rail rules apply when a rail is present). */

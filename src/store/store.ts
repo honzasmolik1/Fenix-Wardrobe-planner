@@ -16,9 +16,9 @@ import {
 import {
   canAddShelf,
   evenSpaceShelvesInBay,
-  findAlignedShelfY,
   findDrawerPlacementY,
   findHangingRailPlacementY,
+  reconcileModulesForCarcassHeight,
   redistributeShelvesEvenly,
   resolveFloorY,
   resolveModuleY,
@@ -35,6 +35,7 @@ import {
 export type ModuleType = "shelf" | "drawer-pack" | "hanging-rail";
 export type BoardMaterial = "white-melamine" | "woodgrain";
 export type HardwareTier = "standard" | "soft-close";
+export type MirrorSide = "none" | "left" | "right";
 
 export interface Wardrobe {
   width: number;
@@ -67,6 +68,8 @@ export interface Materials {
   boardMaterial: BoardMaterial;
   hardwareTier: HardwareTier;
   slidingDoors: boolean;
+  /** Which sliding door panel has a mirror insert */
+  mirrorSide: MirrorSide;
 }
 
 export interface WardrobeState {
@@ -100,6 +103,7 @@ export interface WardrobeState {
   setBoardMaterial: (material: BoardMaterial) => void;
   setHardwareTier: (tier: HardwareTier) => void;
   setSlidingDoors: (enabled: boolean) => void;
+  setMirrorSide: (side: MirrorSide) => void;
 }
 
 export {
@@ -142,6 +146,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
     boardMaterial: "white-melamine",
     hardwareTier: "standard",
     slidingDoors: false,
+    mirrorSide: "none",
   },
   bayCountInput: DEFAULT_BAY_COUNT,
   defaultDrawerCount: DEFAULT_DRAWER_COUNT,
@@ -176,21 +181,22 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
   },
 
   setCarcassHeight: (height) => {
-    const { wardrobe, modules, bays } = get();
+    const { wardrobe, modules, bays, selectedModuleId } = get();
     const next = clampCarcassHeight(height, wardrobe.height);
-    let nextModules = modules;
-    // Re-space shelves so they stay under the construction line
-    for (const bay of bays) {
-      nextModules = redistributeShelvesEvenly(
-        nextModules,
-        bay.id,
-        wardrobe.height,
-        { forceEven: true, carcassHeight: next },
-      );
-    }
+    const nextModules = reconcileModulesForCarcassHeight(
+      modules,
+      bays.map((bay) => bay.id),
+      wardrobe.height,
+      next,
+    );
     set({
       wardrobe: { ...wardrobe, carcassHeight: next },
       modules: nextModules,
+      selectedModuleId:
+        selectedModuleId &&
+        nextModules.some((mod) => mod.id === selectedModuleId)
+          ? selectedModuleId
+          : null,
     });
   },
 
@@ -340,37 +346,6 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
       if (!canAddShelf(bayModules, wardrobe.height, wardrobe.carcassHeight)) return;
 
       const id = createId();
-      const hasDrawers = bayModules.some((mod) => mod.type === "drawer-pack");
-      const hasRail = bayModules.some((mod) => mod.type === "hanging-rail");
-      // Rails / drawers use bay-local spacing rules (100 mm above / 1000 hang)
-      const alignedY =
-        hasDrawers || hasRail
-          ? null
-          : findAlignedShelfY(
-              modules,
-              bayId,
-              wardrobe.height,
-              wardrobe.carcassHeight,
-            );
-
-      if (alignedY !== null) {
-        set({
-          modules: [
-            ...modules,
-            {
-              id,
-              type,
-              bayId,
-              y: alignedY,
-              height: MODULE_HEIGHTS.shelf,
-            },
-          ],
-          selectedBayId: bayId,
-          selectedModuleId: id,
-        });
-        return;
-      }
-
       const withShelf: Module[] = [
         ...modules,
         {
@@ -388,7 +363,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
           bayId,
           wardrobe.height,
           {
-            forceEven: hasDrawers || hasRail,
+            forceEven: true,
             carcassHeight: wardrobe.carcassHeight,
           },
         ),
@@ -475,7 +450,8 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
       item.id === moduleId ? { ...item, y: finalY } : item,
     );
 
-    // Keep shelves locked to 100 mm above / 1000 mm hang when a rail moves
+    // Rail move: re-space shelves for hang / above-rail rules.
+    // Shelf / drawer drags stay where the user put them (use Even below).
     if (target.type === "hanging-rail") {
       nextModules = redistributeShelvesEvenly(
         nextModules,
@@ -572,7 +548,10 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
                 remaining,
                 target.bayId,
                 state.wardrobe.height,
-                { carcassHeight: state.wardrobe.carcassHeight },
+                {
+                  forceEven: true,
+                  carcassHeight: state.wardrobe.carcassHeight,
+                },
               )
             : remaining,
         selectedModuleId:
@@ -621,7 +600,21 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
 
   setSlidingDoors: (enabled) => {
     set((state) => ({
-      materials: { ...state.materials, slidingDoors: enabled },
+      materials: {
+        ...state.materials,
+        slidingDoors: enabled,
+        mirrorSide: enabled ? state.materials.mirrorSide : "none",
+      },
+    }));
+  },
+
+  setMirrorSide: (side) => {
+    set((state) => ({
+      materials: {
+        ...state.materials,
+        slidingDoors: side === "none" ? state.materials.slidingDoors : true,
+        mirrorSide: side,
+      },
     }));
   },
 }));

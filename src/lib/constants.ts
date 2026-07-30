@@ -6,6 +6,9 @@ export const MODULE_HEIGHTS = {
 
 export const SNAP_INCREMENT_MM = 32;
 
+/** Construction / top-bay line snaps in 50 mm steps (default 2000 mm). */
+export const CARCASS_SNAP_MM = 50;
+
 /** Minimum clear air between any two modules */
 export const MODULE_CLEARANCE_MM = 32;
 
@@ -58,10 +61,9 @@ export function clampCarcassHeight(
     MIN_CARCASS_HEIGHT_MM,
     wardrobeHeight - MIN_TOP_BOX_MM,
   );
-  return Math.max(
-    MIN_CARCASS_HEIGHT_MM,
-    Math.min(maxCarcass, Math.round(carcassHeight)),
-  );
+  const snapped =
+    Math.round(carcassHeight / CARCASS_SNAP_MM) * CARCASS_SNAP_MM;
+  return Math.max(MIN_CARCASS_HEIGHT_MM, Math.min(maxCarcass, snapped));
 }
 
 /** Y of the construction shelf (from wardrobe top). */

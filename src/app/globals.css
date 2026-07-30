@@ -338,9 +338,14 @@ select {
 }
 
 .touch-btn-danger {
-  color: #8b3a2f;
-  border-color: rgba(139, 58, 47, 0.25);
-  background: #fff6f4;
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #c62828 0%, #8e1b1b 100%);
+  font-weight: 700;
+}
+
+.touch-btn-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d32f2f 0%, #a11f1f 100%);
 }
 
 .touch-btn:disabled {

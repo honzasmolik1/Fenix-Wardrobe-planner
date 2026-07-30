@@ -40,3 +40,66 @@ export function calculateBayGaps(
 
   return gaps.filter((gap) => gap.height > 0);
 }
+
+/**
+ * Clearances in a vertical zone: from zone top → first fitting, between
+ * fittings, and last fitting → zone bottom (floor / construction underside).
+ */
+export function calculateGapsInZone(
+  modules: Module[],
+  zoneStart: number,
+  zoneEnd: number,
+): Gap[] {
+  if (zoneEnd <= zoneStart) return [];
+
+  const sorted = [...modules]
+    .filter((mod) => mod.y + mod.height > zoneStart && mod.y < zoneEnd)
+    .sort((a, b) => a.y - b.y);
+
+  const gaps: Gap[] = [];
+  let cursor = zoneStart;
+
+  for (const mod of sorted) {
+    const top = Math.max(mod.y, zoneStart);
+    if (top > cursor) {
+      gaps.push({
+        startY: cursor,
+        endY: top,
+        height: top - cursor,
+      });
+    }
+    cursor = Math.max(cursor, Math.min(mod.y + mod.height, zoneEnd));
+  }
+
+  if (cursor < zoneEnd) {
+    gaps.push({
+      startY: cursor,
+      endY: zoneEnd,
+      height: zoneEnd - cursor,
+    });
+  }
+
+  return gaps.filter((gap) => gap.height > 0);
+}
+
+/**
+ * Clearances only between consecutive fittings (shelf / rail / drawer).
+ * Skips ceiling→first and last→floor empty zones.
+ */
+export function calculateGapsBetweenModules(modules: Module[]): Gap[] {
+  const sorted = [...modules].sort((a, b) => a.y - b.y);
+  const gaps: Gap[] = [];
+
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    const upper = sorted[i];
+    const lower = sorted[i + 1];
+    const startY = upper.y + upper.height;
+    const endY = lower.y;
+    const height = endY - startY;
+    if (height > 0) {
+      gaps.push({ startY, endY, height });
+    }
+  }
+
+  return gaps;
+}

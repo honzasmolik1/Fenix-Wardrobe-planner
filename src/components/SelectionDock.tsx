@@ -22,8 +22,8 @@ export function SelectionDock() {
     (state) => state.defaultDrawerCount,
   );
 
-  const evenSpaceShelves = useWardrobeStore((state) => state.evenSpaceShelves);
   const clearBay = useWardrobeStore((state) => state.clearBay);
+  const evenSpaceShelves = useWardrobeStore((state) => state.evenSpaceShelves);
   const swapBayWithNeighbor = useWardrobeStore(
     (state) => state.swapBayWithNeighbor,
   );
@@ -93,8 +93,9 @@ export function SelectionDock() {
                 disabled={bayShelfCount < 1}
                 onClick={() => evenSpaceShelves(selectedBay.id)}
                 className="touch-btn disabled:cursor-not-allowed disabled:opacity-40"
+                title="Space shelves evenly in this bay"
               >
-                Even shelves
+                Even
               </button>
               <button
                 type="button"
@@ -103,7 +104,7 @@ export function SelectionDock() {
                 className="touch-btn touch-btn-danger disabled:cursor-not-allowed disabled:opacity-40"
                 title="Remove all fittings from this bay"
               >
-                Clear bay
+                Clear
               </button>
             </>
           )}

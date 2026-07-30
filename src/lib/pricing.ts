@@ -109,6 +109,19 @@ export function buildBillOfMaterials(
       unitPrice: doorsTotal,
       total: doorsTotal,
     });
+
+    if (materials.mirrorSide !== "none") {
+      const mirrorPrice = Math.round((wardrobe.height / 1000) * 180);
+      const side =
+        materials.mirrorSide === "left" ? "left" : "right";
+      items.push({
+        id: "mirror-door",
+        label: `Mirror insert (${side} door)`,
+        quantity: 1,
+        unitPrice: mirrorPrice,
+        total: mirrorPrice,
+      });
+    }
   }
 
   const total = items.reduce((sum, item) => sum + item.total, 0);
