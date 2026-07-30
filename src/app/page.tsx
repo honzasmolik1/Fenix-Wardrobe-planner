@@ -7,12 +7,12 @@ import { WardrobeCanvasLoader } from "@/components/WardrobeCanvasLoader";
 
 export default function HomePage() {
   return (
-    <main className="app-shell flex h-[100dvh] min-h-[560px] flex-col overflow-hidden">
+    <main className="app-shell flex h-[100dvh] min-h-0 flex-col overflow-hidden">
       <TopBar />
 
       <div
         id="wardrobe-canvas-capture"
-        className="relative min-h-0 flex-1 overflow-hidden bg-white"
+        className="relative min-h-0 flex-1 overflow-hidden bg-white touch-none"
       >
         <WardrobeCanvasLoader />
       </div>

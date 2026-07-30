@@ -147,7 +147,7 @@ export function TopBar() {
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
             Fenix
           </p>
-          <p className="font-[family-name:var(--font-display)] text-2xl font-semibold leading-none text-[var(--ink)] sm:text-[1.75rem]">
+          <p className="brand-title font-[family-name:var(--font-display)] font-semibold tracking-tight text-[var(--ink)]">
             Wardrobe
           </p>
         </div>

@@ -177,21 +177,22 @@ select {
   background: var(--accent);
 }
 
-/* Full-width bars with centered control clusters */
+/* Full-width bars — compact on laptop, larger on tablet touch */
 .toolbar-shell {
   width: 100%;
+  flex-shrink: 0;
 }
 
 .toolbar-row {
   display: flex;
   width: 100%;
-  max-width: 1280px;
+  max-width: 1400px;
   margin: 0 auto;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 0.65rem 0.85rem;
-  padding: 0.7rem 1rem;
+  gap: 0.35rem 0.5rem;
+  padding: 0.35rem 0.75rem;
   box-sizing: border-box;
 }
 
@@ -206,13 +207,18 @@ select {
 }
 
 .toolbar-row-dock {
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
 }
 
 .toolbar-brand {
-  padding-right: 0.5rem;
-  text-align: center;
+  padding-right: 0.4rem;
+  text-align: left;
+}
+
+.toolbar-brand .brand-title {
+  font-size: 1.25rem;
+  line-height: 1;
 }
 
 .toolbar-section {
@@ -220,44 +226,30 @@ select {
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 0.45rem;
+  gap: 0.3rem;
   min-width: 0;
-  padding: 0.4rem 0.65rem;
-  border-radius: 16px;
+  padding: 0.2rem 0.4rem;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--line);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
 }
 
 .toolbar-label {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
-  padding: 0 0.2rem;
+  padding: 0 0.15rem;
 }
 
-@media (max-width: 720px) {
-  .toolbar-row {
-    padding-left: 0.7rem;
-    padding-right: 0.7rem;
-    gap: 0.55rem;
-  }
-
-  .toolbar-section {
-    width: 100%;
-  }
-}
-
-/* Tablet-first toolbar controls — min ~44px touch targets */
 .toolbar-group {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.2rem 0.35rem;
-  border-radius: 14px;
+  gap: 0.3rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 12px;
   background: rgba(247, 248, 250, 0.9);
   border: 1px solid var(--line);
 }
@@ -265,22 +257,23 @@ select {
 .toolbar-field {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.72rem;
+  gap: 0.3rem;
+  font-size: 0.65rem;
   font-weight: 650;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
+/* Laptop / mouse default — compact so wardrobe gets the screen */
 .toolbar-input,
 .toolbar-select {
-  min-height: 52px;
-  border-radius: 14px;
+  min-height: 32px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: #fff;
-  padding: 0.65rem 0.85rem;
-  font-size: 1.05rem;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.84rem;
   font-weight: 650;
   color: var(--ink);
   outline: none;
@@ -293,22 +286,22 @@ select {
 }
 
 .toolbar-select {
-  max-width: 8.5rem;
+  max-width: 7.25rem;
 }
 
 .touch-btn,
 .touch-chip {
-  min-height: 52px;
-  min-width: 52px;
+  min-height: 32px;
+  min-width: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.45rem;
-  border-radius: 14px;
+  gap: 0.35rem;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: #fff;
-  padding: 0.7rem 1.15rem;
-  font-size: 0.98rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
   font-weight: 650;
   color: var(--ink);
   cursor: pointer;
@@ -357,21 +350,20 @@ select {
 
 .touch-chip {
   border-radius: 999px;
-  font-size: 0.88rem;
+  font-size: 0.75rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding-left: 1.1rem;
-  padding-right: 1.1rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
 }
 
-/* Fixed-size bay chips; strip scrolls only when it hits the display edge */
 .bay-strip {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.3rem;
   min-width: 0;
-  max-width: min(100%, 42rem);
+  max-width: min(100%, 36rem);
   overflow-x: auto;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
@@ -382,7 +374,7 @@ select {
 }
 
 .bay-strip::-webkit-scrollbar {
-  height: 6px;
+  height: 5px;
 }
 
 .bay-strip::-webkit-scrollbar-thumb {
@@ -391,11 +383,11 @@ select {
 }
 
 .bay-chip {
-  flex: 0 0 5.75rem;
-  width: 5.75rem;
-  max-width: 5.75rem;
-  padding-left: 0.35rem;
-  padding-right: 0.35rem;
+  flex: 0 0 4.75rem;
+  width: 4.75rem;
+  max-width: 4.75rem;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -405,9 +397,9 @@ select {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.3rem;
   min-width: 0;
-  max-width: min(100%, 36rem);
+  max-width: min(100%, 32rem);
   overflow-x: auto;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
@@ -415,6 +407,47 @@ select {
   border: none;
   background: transparent;
   padding: 0;
+}
+
+/* Samsung tablet / touch screens — larger hit targets, still not phone */
+@media (pointer: coarse) and (min-width: 768px) {
+  .toolbar-row {
+    gap: 0.45rem 0.6rem;
+    padding: 0.45rem 0.85rem;
+  }
+
+  .toolbar-section {
+    gap: 0.4rem;
+    padding: 0.3rem 0.5rem;
+  }
+
+  .toolbar-input,
+  .toolbar-select,
+  .touch-btn,
+  .touch-chip {
+    min-height: 44px;
+    min-width: 44px;
+    font-size: 0.9rem;
+    padding: 0.45rem 0.9rem;
+  }
+
+  .bay-chip {
+    flex-basis: 5.25rem;
+    width: 5.25rem;
+    max-width: 5.25rem;
+  }
+}
+
+/* Short laptop screens (MacBook Air 13") — keep chrome thin */
+@media (pointer: fine) and (max-height: 920px) {
+  .toolbar-row {
+    padding-top: 0.28rem;
+    padding-bottom: 0.28rem;
+  }
+
+  .toolbar-brand .brand-title {
+    font-size: 1.15rem;
+  }
 }
 
 @keyframes fade-rise {

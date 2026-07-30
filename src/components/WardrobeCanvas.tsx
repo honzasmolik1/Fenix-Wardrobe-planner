@@ -16,13 +16,15 @@ import {
   useWardrobeStore,
 } from "@/store/store";
 
-/** Space around the carcass for dimension labels (px at 1:1 before scale) */
-const DIM_LEFT = 72;
-const DIM_RIGHT = 20;
-const DIM_TOP = 18;
-const DIM_BOTTOM = 52;
+/** Space around the carcass for dimension labels */
+const DIM_LEFT = 64;
+const DIM_RIGHT = 14;
+const DIM_TOP = 12;
+const DIM_BOTTOM = 44;
 /** Extra margin so the drawing sits a bit off the screen/PDF edges */
-const EDGE_GAP = 12;
+const EDGE_GAP = 8;
+/** Minimum finger hit height for thin shelves (px) */
+const SHELF_HIT_PX = 36;
 /** Visual carcass board thickness in mm (drawn outside the interior) */
 const BOARD_THICKNESS_MM = 22;
 const DIVIDER_STROKE = 5;
@@ -71,6 +73,13 @@ function ModuleShape({
   const heightPx = Math.max(mod.height * scale, 3);
   const widthPx = Math.max(bayWidthPx - inset * 2, 4);
   const drawerCount = mod.drawerCount ?? 3;
+  const hitHeight =
+    mod.type === "shelf"
+      ? Math.max(heightPx, SHELF_HIT_PX)
+      : mod.type === "hanging-rail"
+        ? Math.max(heightPx, 40)
+        : heightPx;
+  const hitOffsetY = (heightPx - hitHeight) / 2;
 
   useEffect(() => {
     if (draggingRef.current) return;
@@ -91,11 +100,22 @@ function ModuleShape({
           y: Math.min(Math.max(0, pos.y), maxY),
         };
       }}
-      onMouseDown={() => onSelect(mod.id)}
-      onTouchStart={() => onSelect(mod.id)}
-      onDragStart={() => {
-        draggingRef.current = true;
+      onMouseDown={(event) => {
+        event.cancelBubble = true;
         onSelect(mod.id);
+      }}
+      onTouchStart={(event) => {
+        event.cancelBubble = true;
+        event.evt.preventDefault();
+        onSelect(mod.id);
+      }}
+      onDragStart={(event) => {
+        draggingRef.current = true;
+        event.evt.preventDefault();
+        onSelect(mod.id);
+      }}
+      onDragMove={(event) => {
+        event.evt.preventDefault();
       }}
       onDragEnd={(event) => {
         const node = event.currentTarget;
@@ -121,6 +141,14 @@ function ModuleShape({
         if (stage) stage.container().style.cursor = "default";
       }}
     >
+      {/* Invisible tall hit area — shelves are thin; fingers need this */}
+      <Rect
+        x={0}
+        y={hitOffsetY}
+        width={widthPx}
+        height={hitHeight}
+        fill="rgba(0,0,0,0.001)"
+      />
       {mod.type === "drawer-pack" ? (
         <DrawerPackVisual
           widthPx={widthPx}
@@ -145,6 +173,7 @@ function ModuleShape({
           shadowColor="rgba(16, 35, 58, 0.2)"
           shadowBlur={selected ? 6 : 3}
           shadowOffsetY={1}
+          listening={false}
         />
       )}
     </Group>
@@ -392,6 +421,16 @@ export function WardrobeCanvas() {
     return () => observer.disconnect();
   }, []);
 
+  // Prevent page scroll from stealing tablet finger drags on the canvas
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const container = stage.container();
+    container.style.touchAction = "none";
+    container.style.userSelect = "none";
+    container.style.setProperty("-webkit-user-select", "none");
+  }, [size.width, size.height]);
+
   const scale = useMemo(() => {
     const contentWmm = wardrobe.width + BOARD_THICKNESS_MM * 2;
     const contentHmm = wardrobe.height + BOARD_THICKNESS_MM * 2;
@@ -610,11 +649,16 @@ export function WardrobeCanvas() {
                   const stage = event.target.getStage();
                   if (stage) stage.container().style.cursor = "default";
                 }}
-                onTouchStart={() => {
+                onTouchStart={(event) => {
                   constructDragRef.current = true;
+                  event.evt.preventDefault();
                 }}
-                onDragStart={() => {
+                onDragStart={(event) => {
                   constructDragRef.current = true;
+                  event.evt.preventDefault();
+                }}
+                onDragMove={(event) => {
+                  event.evt.preventDefault();
                 }}
                 onDragEnd={(event) => {
                   const node = event.target;
