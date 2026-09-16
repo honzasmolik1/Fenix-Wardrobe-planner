@@ -14,6 +14,7 @@ export interface QuotePdfUnit {
 interface ExportQuoteOptions {
   units: QuotePdfUnit[];
   clientName: string;
+  clientEmail?: string;
   extraNotes?: string;
   fileName?: string;
 }
@@ -184,6 +185,7 @@ function drawQuoteHeader(
   pdf: jsPDF,
   opts: {
     clientName: string;
+    clientEmail: string;
     unitCaption: string;
     dimensions: string;
     dateLabel: string;
@@ -229,6 +231,15 @@ function drawQuoteHeader(
     const nameLines = pdf.splitTextToSize(opts.clientName.trim(), textWidth);
     pdf.text(nameLines, textX, y);
     y += nameLines.length * 5.4 + 1;
+  }
+
+  if (opts.clientEmail.trim()) {
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9.5);
+    pdf.setTextColor(MUTED.r, MUTED.g, MUTED.b);
+    const emailLines = pdf.splitTextToSize(opts.clientEmail.trim(), textWidth);
+    pdf.text(emailLines, textX, y);
+    y += emailLines.length * 4.6 + 1;
   }
 
   if (opts.unitCaption.trim()) {
@@ -407,6 +418,7 @@ export async function captureUnitJpeg(
 export async function exportQuotePdf({
   units,
   clientName,
+  clientEmail = "",
   extraNotes = "",
   fileName = "fenix-wardrobe.pdf",
 }: ExportQuoteOptions): Promise<void> {
@@ -432,6 +444,7 @@ export async function exportQuotePdf({
 
     const headerBottom = drawQuoteHeader(pdf, {
       clientName,
+      clientEmail,
       unitCaption: unit.unitCaption,
       dimensions: unit.dimensions,
       dateLabel,

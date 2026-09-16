@@ -8,7 +8,7 @@ if (typeof window !== "undefined") {
   Konva.pixelRatio = Math.min(3, Math.max(2, window.devicePixelRatio || 2));
 }
 import {
-  resizeWardrobeBaysForWidth,
+  normalizeBayWidths,
 } from "@/lib/standardLayout";
 import {
   DRAWER_BAY_WIDTH_MM,
@@ -68,11 +68,22 @@ const DIM_LINE_COLOR = "#4a4f57";
 const BADGE_FILL = "#1f2226";
 const GAP_DIM_COLOR = "#7a808a";
 const GAP_DIM_ACTIVE = "#3d434c";
-/** Studio backdrop (screen only — PDF stays white) */
-const WALL_TOP = "#f3f4f5";
-const WALL_BOTTOM = "#e6e8eb";
-const FLOOR_TOP = "#e2ded7";
-const FLOOR_BOTTOM = "#d6d1c8";
+/**
+ * Studio backdrop (screen only — PDF stays white). The wall flips light or
+ * dark against the carcass finish so a white unit never washes into it.
+ */
+const BACKDROP_FOR_LIGHT_UNIT = {
+  wallTop: "#c6ccd5",
+  wallBottom: "#aab2bf",
+  floorTop: "#a79e91",
+  floorBottom: "#918879",
+};
+const BACKDROP_FOR_DARK_UNIT = {
+  wallTop: "#f4f5f7",
+  wallBottom: "#e4e7eb",
+  floorTop: "#e2ded7",
+  floorBottom: "#d1ccc2",
+};
 
 function carcassColourId(
   colour: CarcassColour | undefined,
@@ -1291,7 +1302,7 @@ export function WardrobeCanvas() {
     return () => observer.disconnect();
   }, []);
 
-  // Drawer bays stay 500 mm
+  // Drawer bays stay 500 mm, and the bays always add up to the full width
   useEffect(() => {
     const state = useWardrobeStore.getState();
     if (state.unitMode === "media") return;
@@ -1304,8 +1315,9 @@ export function WardrobeCanvas() {
         (bay.width !== DRAWER_BAY_WIDTH_MM || !bay.lockedWidth)
       );
     });
-    if (!needsLock) return;
-    const { bays, modules } = resizeWardrobeBaysForWidth(
+    const totalBayWidth = state.bays.reduce((sum, bay) => sum + bay.width, 0);
+    if (!needsLock && totalBayWidth === state.wardrobe.width) return;
+    const { bays, modules } = normalizeBayWidths(
       state.bays,
       state.modules,
       state.wardrobe.width,
@@ -1405,6 +1417,9 @@ export function WardrobeCanvas() {
   const boardPaint = boardColour;
   const kickerFill = fasciaFill;
   const showScene = !pdfExporting;
+  const backdrop = fillIsDark(boardColour)
+    ? BACKDROP_FOR_DARK_UNIT
+    : BACKDROP_FOR_LIGHT_UNIT;
   /** Line carcass with double outer walls (wardrobe always; media when enabled) */
   const doubleOuterSides = useDoubleOuter;
   const carcassHeight = wardrobe.carcassHeight;
@@ -1439,7 +1454,7 @@ export function WardrobeCanvas() {
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden"
-      style={{ background: showScene ? WALL_BOTTOM : "#ffffff" }}
+      style={{ background: showScene ? backdrop.wallBottom : "#ffffff" }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           clearCanvasHighlight();
@@ -1469,7 +1484,9 @@ export function WardrobeCanvas() {
             fillLinearGradientStartPoint={{ x: 0, y: 0 }}
             fillLinearGradientEndPoint={{ x: 0, y: stageHeight }}
             fillLinearGradientColorStops={
-              showScene ? [0, WALL_TOP, 1, WALL_BOTTOM] : undefined
+              showScene
+                ? [0, backdrop.wallTop, 1, backdrop.wallBottom]
+                : undefined
             }
             onMouseDown={() => clearCanvasHighlight()}
             onTap={() => clearCanvasHighlight()}
@@ -1493,9 +1510,9 @@ export function WardrobeCanvas() {
                       fillLinearGradientEndPoint={{ x: 0, y: floorH }}
                       fillLinearGradientColorStops={[
                         0,
-                        FLOOR_TOP,
+                        backdrop.floorTop,
                         1,
-                        FLOOR_BOTTOM,
+                        backdrop.floorBottom,
                       ]}
                     />
                     <Rect
@@ -1515,9 +1532,9 @@ export function WardrobeCanvas() {
                 width={outerWidth - 4}
                 height={outerHeight - 4}
                 fill="rgba(0,0,0,0.001)"
-                shadowColor="rgba(20, 22, 26, 0.35)"
-                shadowBlur={26}
-                shadowOffsetY={10}
+                shadowColor="rgba(16, 18, 22, 0.5)"
+                shadowBlur={34}
+                shadowOffsetY={14}
                 shadowOpacity={1}
               />
               <Rect
@@ -1529,7 +1546,7 @@ export function WardrobeCanvas() {
                 fillLinearGradientEndPoint={{ x: 0, y: 8 }}
                 fillLinearGradientColorStops={[
                   0,
-                  "rgba(0,0,0,0.22)",
+                  "rgba(0,0,0,0.32)",
                   1,
                   "rgba(0,0,0,0)",
                 ]}

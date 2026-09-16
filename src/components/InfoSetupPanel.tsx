@@ -14,9 +14,14 @@ export function InfoSetupPanel({ onClose }: { onClose?: () => void }) {
   const clientNameRequired = useWardrobeStore(
     (state) => state.clientNameRequired,
   );
+  const clientEmail = useWardrobeStore((state) => state.clientEmail);
+  const clientEmailRequired = useWardrobeStore(
+    (state) => state.clientEmailRequired,
+  );
   const extraNotes = useWardrobeStore((state) => state.extraNotes);
   const setUnitCaption = useWardrobeStore((state) => state.setUnitCaption);
   const setClientName = useWardrobeStore((state) => state.setClientName);
+  const setClientEmail = useWardrobeStore((state) => state.setClientEmail);
   const setExtraNotes = useWardrobeStore((state) => state.setExtraNotes);
   const unitMode = useWardrobeStore((state) => state.unitMode);
   const designs = useWardrobeStore((state) => state.designs);
@@ -28,6 +33,7 @@ export function InfoSetupPanel({ onClose }: { onClose?: () => void }) {
   const hasTvUnit =
     unitMode === "media" || designs.some((item) => item.unitMode === "media");
   const clientInputRef = useRef<HTMLInputElement>(null);
+  const emailInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!clientNameRequired) return;
@@ -37,6 +43,15 @@ export function InfoSetupPanel({ onClose }: { onClose?: () => void }) {
       behavior: "smooth",
     });
   }, [clientNameRequired]);
+
+  useEffect(() => {
+    if (!clientEmailRequired || clientNameRequired) return;
+    emailInputRef.current?.focus();
+    emailInputRef.current?.scrollIntoView({
+      block: "center",
+      behavior: "smooth",
+    });
+  }, [clientEmailRequired, clientNameRequired]);
 
   return (
     <div className="tv-panel doors-panel flex h-full flex-col">
@@ -95,6 +110,33 @@ export function InfoSetupPanel({ onClose }: { onClose?: () => void }) {
             {clientNameRequired && (
               <p className="text-sm font-medium text-[#9b2c2c]">
                 Enter the client name before saving the PDF.
+              </p>
+            )}
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium text-[var(--ink)]">
+              Client email{" "}
+              <span className="text-[var(--accent-deep)]">*</span>
+            </span>
+            <input
+              ref={emailInputRef}
+              suppressHydrationWarning
+              type="email"
+              required
+              aria-required="true"
+              aria-invalid={clientEmailRequired}
+              autoComplete="email"
+              inputMode="email"
+              value={clientEmail}
+              onChange={(event) => setClientEmail(event.target.value)}
+              className={`${fieldClass}${
+                clientEmailRequired ? " field-input-error" : ""
+              }`}
+              placeholder="Required before PDF"
+            />
+            {clientEmailRequired && (
+              <p className="text-sm font-medium text-[#9b2c2c]">
+                Enter a valid client email before saving the PDF.
               </p>
             )}
           </label>

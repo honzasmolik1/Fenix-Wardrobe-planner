@@ -19,6 +19,7 @@ import {
   MAX_DRAWER_COUNT,
   MIN_DRAWER_COUNT,
   type ModuleType,
+  isValidClientEmail,
   useWardrobeStore,
 } from "@/store/store";
 
@@ -67,8 +68,12 @@ export function TopBar({
   const unitCaption = useWardrobeStore((state) => state.unitCaption);
   const extraNotes = useWardrobeStore((state) => state.extraNotes);
   const clientName = useWardrobeStore((state) => state.clientName);
+  const clientEmail = useWardrobeStore((state) => state.clientEmail);
   const setClientNameRequired = useWardrobeStore(
     (state) => state.setClientNameRequired,
+  );
+  const setClientEmailRequired = useWardrobeStore(
+    (state) => state.setClientEmailRequired,
   );
   const setDoorSystemRequired = useWardrobeStore(
     (state) => state.setDoorSystemRequired,
@@ -157,8 +162,11 @@ export function TopBar({
   };
 
   const handleCreatePdf = async () => {
-    if (!clientName.trim()) {
-      setClientNameRequired(true);
+    const missingName = !clientName.trim();
+    const missingEmail = !isValidClientEmail(clientEmail);
+    if (missingName || missingEmail) {
+      setClientNameRequired(missingName);
+      setClientEmailRequired(missingEmail);
       onOpenInfoPanel?.();
       return;
     }
@@ -229,6 +237,7 @@ export function TopBar({
       await exportQuotePdf({
         units,
         clientName: clientName.trim(),
+        clientEmail: clientEmail.trim(),
         extraNotes,
         fileName: `fenix-${clientSlug}.pdf`,
       });
@@ -269,6 +278,14 @@ export function TopBar({
     Boolean(selectedBay) &&
     selectedBayShelves >= 1 &&
     neighborBayHasShelves(modules, bays, selectedBay!.id);
+
+  const pdfBlockedReason = !clientName.trim()
+    ? "Enter client name before saving PDF"
+    : !isValidClientEmail(clientEmail)
+      ? "Enter a valid client email before saving PDF"
+      : !isMedia && materials.doorSystem === "none"
+        ? "Select a door system before saving PDF"
+        : null;
 
   const canAdd = Boolean(selectedBayId) || bays.length > 0;
   const activeBayId = selectedBayId ?? bays[0]?.id ?? null;
@@ -493,13 +510,7 @@ export function TopBar({
               type="button"
               className="touch-btn touch-btn-pdf"
               disabled={exporting}
-              title={
-                !clientName.trim()
-                  ? "Enter client name before saving PDF"
-                  : !isMedia && materials.doorSystem === "none"
-                    ? "Select a door system before saving PDF"
-                    : "Save PDF"
-              }
+              title={pdfBlockedReason ?? "Save PDF"}
               onClick={() => {
                 void handleCreatePdf();
               }}
@@ -647,13 +658,7 @@ export function TopBar({
           type="button"
           className="touch-btn touch-btn-pdf"
           disabled={exporting}
-          title={
-            !clientName.trim()
-              ? "Enter client name before saving PDF"
-              : !isMedia && materials.doorSystem === "none"
-                ? "Select a door system before saving PDF"
-                : "Save PDF"
-          }
+          title={pdfBlockedReason ?? "Save PDF"}
           onClick={() => {
             void handleCreatePdf();
           }}

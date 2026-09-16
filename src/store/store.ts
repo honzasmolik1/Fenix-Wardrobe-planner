@@ -92,7 +92,7 @@ import {
   createStandardModules,
   MAX_WARDROBE_BAY_COUNT,
   minBayCountForWidth,
-  resizeBaysPreservingLocks,
+  normalizeBayWidths,
   resizeWardrobeBaysForWidth,
   setFlexibleBayWidth,
 } from "@/lib/standardLayout";
@@ -229,6 +229,10 @@ export interface WardrobeState {
   clientName: string;
   /** Highlight the client field after a blocked PDF export */
   clientNameRequired: boolean;
+  /** Client email printed under the client name — required before PDF */
+  clientEmail: string;
+  /** Highlight the email field after a blocked PDF export */
+  clientEmailRequired: boolean;
   /** Highlight doors after a blocked PDF export */
   doorSystemRequired: boolean;
   /** Bumps so the doors tab pulse replays on each PDF click */
@@ -343,6 +347,8 @@ export interface WardrobeState {
   setUnitCaption: (caption: string) => void;
   setClientName: (name: string) => void;
   setClientNameRequired: (required: boolean) => void;
+  setClientEmail: (email: string) => void;
+  setClientEmailRequired: (required: boolean) => void;
   setDoorSystemRequired: (required: boolean) => void;
   setExtraNotes: (notes: string) => void;
   setExtraNotesOnPdf: (enabled: boolean) => void;
@@ -372,6 +378,10 @@ const createId = (): string =>
 
 const clampDrawerCount = (count: number) =>
   Math.max(MIN_DRAWER_COUNT, Math.min(MAX_DRAWER_COUNT, Math.round(count)));
+
+/** Quotes get emailed, so the address has to be usable before the PDF is made. */
+export const isValidClientEmail = (email: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 
 const DEFAULT_WIDTH = 2400;
 const DEFAULT_HEIGHT = 2400;
@@ -676,6 +686,8 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
   unitCaption: FIRST_DESIGN.caption,
   clientName: "",
   clientNameRequired: false,
+  clientEmail: "",
+  clientEmailRequired: false,
   doorSystemRequired: false,
   doorSystemPromptKey: 0,
   extraNotes: "",
@@ -2208,6 +2220,17 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
   setClientNameRequired: (required) =>
     set({ clientNameRequired: Boolean(required) }),
 
+  setClientEmail: (email) =>
+    set({
+      clientEmail: email,
+      clientEmailRequired: isValidClientEmail(email)
+        ? false
+        : get().clientEmailRequired,
+    }),
+
+  setClientEmailRequired: (required) =>
+    set({ clientEmailRequired: Boolean(required) }),
+
   setDoorSystemRequired: (required) =>
     set({
       doorSystemRequired: Boolean(required),
@@ -2438,11 +2461,9 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
           drawerCount,
         },
       ];
-      const laidOut = resizeWardrobeBaysForWidth(
-        bays,
-        withDrawer,
-        wardrobe.width,
-      );
+      // Pin the bay at 500 mm and re-share the rest — without re-deriving the
+      // bay count, so adding drawers never re-divides the wardrobe.
+      const laidOut = normalizeBayWidths(bays, withDrawer, wardrobe.width);
 
       set({
         bays: laidOut.bays,
@@ -2506,7 +2527,11 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
         const unlocked = bays.map((bay) =>
           bay.id === bayId ? { ...bay, lockedWidth: undefined } : bay,
         );
-        nextBays = resizeBaysPreservingLocks(unlocked, wardrobe.width);
+        nextBays = normalizeBayWidths(
+          unlocked,
+          nextModules,
+          wardrobe.width,
+        ).bays;
       }
     }
 
@@ -2663,7 +2688,11 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
               ? { ...bay, lockedWidth: undefined }
               : bay,
           );
-          nextBays = resizeBaysPreservingLocks(unlocked, state.wardrobe.width);
+          nextBays = normalizeBayWidths(
+            unlocked,
+            remaining,
+            state.wardrobe.width,
+          ).bays;
         }
       }
 
@@ -2752,7 +2781,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
       const unlocked = bays.map((item) =>
         item.id === id ? { ...item, lockedWidth: undefined } : item,
       );
-      nextBays = resizeBaysPreservingLocks(unlocked, wardrobe.width);
+      nextBays = normalizeBayWidths(unlocked, remaining, wardrobe.width).bays;
     }
 
     set({

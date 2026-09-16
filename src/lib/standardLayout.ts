@@ -29,14 +29,18 @@ export function bayCountForWidth(
   drawerBayCount = 1,
 ): number {
   const w = Math.max(MIN_WARDROBE_WIDTH_MM, Math.round(width));
-  if (w <= 1250) return 2;
-  if (w < WIDE_WARDROBE_FOUR_BAY_MM) return 3;
-
   const drawers = Math.max(1, Math.round(drawerBayCount) || 1);
   const flexBudget = Math.max(0, w - drawers * DRAWER_BAY_WIDTH_MM);
+  // Drawer bays are pinned at 500 mm, so the rest of the width always needs
+  // at least one bay of its own — otherwise the carcass is left part-open.
+  const minimum = drawers + (flexBudget > 0 ? 1 : 0);
+
+  if (w <= 1250) return Math.max(2, minimum);
+  if (w < WIDE_WARDROBE_FOUR_BAY_MM) return Math.max(3, minimum);
+
   const flexNeeded = Math.max(1, Math.ceil(flexBudget / MAX_BAY_WIDTH_MM));
   return Math.min(
-    MAX_WARDROBE_BAY_COUNT,
+    Math.max(MAX_WARDROBE_BAY_COUNT, minimum),
     Math.max(4, drawers + flexNeeded),
   );
 }
@@ -110,6 +114,146 @@ export function createStandardBays(width: number): Bay[] {
 }
 
 /**
+ * How many flexible bays the leftover width needs.
+ * Keeps the count the user already has unless that would squeeze a bay below
+ * the minimum, or (on wide units) leave one over the shelf sag limit.
+ */
+function flexBayCountForBudget(
+  budget: number,
+  currentCount: number,
+  capToSagLimit: boolean,
+): number {
+  if (budget <= 0) return 0;
+  const mostByMinWidth = Math.max(
+    1,
+    Math.floor(budget / MIN_FLEXIBLE_BAY_WIDTH_MM),
+  );
+  let count = Math.min(Math.max(1, currentCount), mostByMinWidth);
+  if (capToSagLimit) {
+    count = Math.max(count, Math.ceil(budget / MAX_BAY_WIDTH_MM));
+  }
+  return count;
+}
+
+/** Share a width across bays so the parts add back up to the whole exactly. */
+function splitEvenly(budget: number, count: number): number[] {
+  if (count <= 0) return [];
+  const base = Math.floor(budget / count);
+  const widths = Array.from({ length: count }, () => base);
+  widths[count - 1] += budget - base * count;
+  return widths;
+}
+
+/**
+ * The one rule the drawing depends on: every millimetre of the wardrobe
+ * belongs to a bay. Drawer bays are pinned at 500 mm, so whatever is left over
+ * is shared by the flexible bays — and if there are none left, a bay is added
+ * to cover it. Without this the carcass renders with an open, wall-less side.
+ *
+ * The bay count is otherwise left alone, so adding drawers never silently
+ * re-divides the wardrobe.
+ */
+export function normalizeBayWidths(
+  bays: Bay[],
+  modules: Module[],
+  totalWidth: number,
+): { bays: Bay[]; modules: Module[] } {
+  const width = Math.max(MIN_WARDROBE_WIDTH_MM, Math.round(totalWidth));
+  const sorted = [...bays].sort((a, b) => a.index - b.index);
+
+  if (sorted.length === 0) {
+    return {
+      bays: createBaysWithCount(width, bayCountForWidth(width, 1), false),
+      modules: [],
+    };
+  }
+
+  const next = lockDrawerBays(sorted, modules).map((bay) => ({ ...bay }));
+  const lockedCount = next.filter((bay) => bay.lockedWidth).length;
+  const lockedTotal = lockedCount * DRAWER_BAY_WIDTH_MM;
+
+  // More drawer bays than the wardrobe is wide: keep them all visible by
+  // sharing the width rather than letting them run past the end panel.
+  if (lockedTotal > width) {
+    const widths = splitEvenly(width, lockedCount);
+    let lockedIndex = 0;
+    const trimmed = next
+      .filter((bay) => bay.lockedWidth)
+      .map((bay, index) => ({
+        ...bay,
+        index,
+        width: widths[lockedIndex++] ?? DRAWER_BAY_WIDTH_MM,
+      }));
+    return {
+      bays: trimmed,
+      modules: modules.filter((mod) =>
+        trimmed.some((bay) => bay.id === mod.bayId),
+      ),
+    };
+  }
+
+  const budget = width - lockedTotal;
+  const flexBays = next.filter((bay) => !bay.lockedWidth);
+  const wantedFlex = Math.min(
+    flexBayCountForBudget(
+      budget,
+      flexBays.length,
+      width >= WIDE_WARDROBE_FOUR_BAY_MM,
+    ),
+    // The sag limit must never cost us the ability to close the carcass
+    Math.max(MAX_WARDROBE_BAY_COUNT - lockedCount, budget > 0 ? 1 : 0),
+  );
+
+  let laidOut = next;
+
+  if (wantedFlex > flexBays.length) {
+    // Slot new bays in ahead of any drawer bays on the end, so a drawer bank
+    // that was the last bay stays the last bay.
+    const lastFlex = laidOut.map((bay) => !bay.lockedWidth).lastIndexOf(true);
+    const insertAt = lastFlex >= 0 ? lastFlex + 1 : laidOut.length;
+    const additions = Array.from(
+      { length: wantedFlex - flexBays.length },
+      () => ({
+        id: createId(),
+        index: insertAt,
+        width: MIN_FLEXIBLE_BAY_WIDTH_MM,
+        lockedWidth: undefined,
+      }),
+    );
+    laidOut = [
+      ...laidOut.slice(0, insertAt),
+      ...additions,
+      ...laidOut.slice(insertAt),
+    ];
+  } else if (wantedFlex < flexBays.length) {
+    // Shed the bays nearest the end first — the fittings on bay 1 stay put.
+    const drop = new Set(flexBays.slice(wantedFlex).map((bay) => bay.id));
+    laidOut = laidOut.filter((bay) => !drop.has(bay.id));
+  }
+
+  const widths = splitEvenly(budget, wantedFlex);
+  let flexIndex = 0;
+  const finalBays = laidOut.map((bay, index) => {
+    if (bay.lockedWidth) {
+      return {
+        ...bay,
+        index,
+        width: DRAWER_BAY_WIDTH_MM,
+        lockedWidth: DRAWER_BAY_WIDTH_MM,
+      };
+    }
+    return { ...bay, index, width: widths[flexIndex++] ?? 0 };
+  });
+
+  return {
+    bays: finalBays,
+    modules: modules.filter((mod) =>
+      finalBays.some((bay) => bay.id === mod.bayId),
+    ),
+  };
+}
+
+/**
  * When overall wardrobe width changes: drawer bay stays 500 mm.
  * Under 2402 mm → 3 bays. From 2402 mm → 4+ so no flex bay exceeds 800 mm.
  */
@@ -119,48 +263,24 @@ export function resizeWardrobeBaysForWidth(
   nextWidth: number,
 ): { bays: Bay[]; modules: Module[] } {
   const width = Math.max(MIN_WARDROBE_WIDTH_MM, Math.round(nextWidth));
-  let nextBays = lockDrawerBays(bays, modules);
-  let nextModules = modules;
-  const drawers = countDrawerBays(nextBays, nextModules);
-  let count = bayCountForWidth(width, drawers);
+  const locked = lockDrawerBays(bays, modules);
+  const drawers = countDrawerBays(locked, modules);
+  const desired = bayCountForWidth(width, drawers);
 
-  const apply = (desired: number) => {
-    nextBays = lockDrawerBays(nextBays, nextModules);
-    if (nextBays.length === 0) {
-      nextBays = createBaysWithCount(width, desired, drawers > 0);
-      nextModules = [];
-      return;
-    }
-    if (nextBays.length !== desired) {
-      const adjusted = adjustBayCountKeepingDrawerEnds(
-        nextBays,
-        nextModules,
-        width,
-        desired,
-      );
-      nextBays = lockDrawerBays(adjusted.bays, adjusted.modules);
-      nextModules = adjusted.modules;
-      return;
-    }
-    nextBays = evenUnlockedBays(nextBays, width);
-  };
-
-  apply(count);
-
-  // Extra bays so flex bays stay ≤ 800 mm once the unit is 2402 mm or wider
-  if (width >= WIDE_WARDROBE_FOUR_BAY_MM) {
-    while (
-      nextBays.some(
-        (bay) => !bay.lockedWidth && bay.width > MAX_BAY_WIDTH_MM,
-      ) &&
-      count < MAX_WARDROBE_BAY_COUNT
-    ) {
-      count += 1;
-      apply(count);
-    }
+  if (locked.length === 0) {
+    return normalizeBayWidths(
+      createBaysWithCount(width, desired, drawers > 0),
+      modules,
+      width,
+    );
   }
 
-  return { bays: nextBays, modules: nextModules };
+  const adjusted =
+    locked.length === desired
+      ? { bays: locked, modules }
+      : adjustBayCountKeepingDrawerEnds(locked, modules, width, desired);
+
+  return normalizeBayWidths(adjusted.bays, adjusted.modules, width);
 }
 
 /**
@@ -265,52 +385,6 @@ export function createStandardModules(
   return modules;
 }
 
-/** Keep locked drawer-bay widths fixed; stretch the flexible bays. */
-export function resizeBaysPreservingLocks(
-  bays: Bay[],
-  nextWidth: number,
-): Bay[] {
-  const sorted = [...bays].sort((a, b) => a.index - b.index);
-  const lockedTotal = sorted.reduce(
-    (sum, bay) => sum + (bay.lockedWidth ? DRAWER_BAY_WIDTH_MM : 0),
-    0,
-  );
-  const flexible = sorted.filter((bay) => !bay.lockedWidth);
-  const flexibleBudget = Math.max(0, nextWidth - lockedTotal);
-
-  if (flexible.length === 0) {
-    return sorted.map((bay, index) => ({
-      ...bay,
-      index,
-      width: bay.lockedWidth ? DRAWER_BAY_WIDTH_MM : bay.width,
-      lockedWidth: bay.lockedWidth ? DRAWER_BAY_WIDTH_MM : undefined,
-    }));
-  }
-
-  const prevFlexTotal =
-    flexible.reduce((sum, bay) => sum + bay.width, 0) || flexible.length;
-  const raw = flexible.map((bay) =>
-    Math.floor((bay.width / prevFlexTotal) * flexibleBudget),
-  );
-  const used = raw.reduce((sum, value) => sum + value, 0);
-  raw[raw.length - 1] += flexibleBudget - used;
-
-  let flexIndex = 0;
-  return sorted.map((bay, index) => {
-    if (bay.lockedWidth) {
-      return {
-        ...bay,
-        index,
-        width: DRAWER_BAY_WIDTH_MM,
-        lockedWidth: DRAWER_BAY_WIDTH_MM,
-      };
-    }
-    const width = raw[flexIndex] ?? Math.floor(flexibleBudget / flexible.length);
-    flexIndex += 1;
-    return { ...bay, index, width };
-  });
-}
-
 export const MIN_FLEXIBLE_BAY_WIDTH_MM = 300;
 
 /**
@@ -375,43 +449,11 @@ export function adjustBayCountKeepingDrawerEnds(
   }
 
   const reindexed = next.map((bay, index) => ({ ...bay, index }));
-  return {
-    bays: evenUnlockedBays(reindexed, totalWidth),
-    modules: modules.filter((mod) =>
-      reindexed.some((bay) => bay.id === mod.bayId),
-    ),
-  };
-}
-
-function evenUnlockedBays(bays: Bay[], totalWidth: number): Bay[] {
-  const sorted = [...bays].sort((a, b) => a.index - b.index);
-  const lockedTotal = sorted.reduce(
-    (sum, bay) => sum + (bay.lockedWidth ? DRAWER_BAY_WIDTH_MM : 0),
-    0,
+  return normalizeBayWidths(
+    reindexed,
+    modules.filter((mod) => reindexed.some((bay) => bay.id === mod.bayId)),
+    totalWidth,
   );
-  const flexible = sorted.filter((bay) => !bay.lockedWidth);
-  const budget = Math.max(0, totalWidth - lockedTotal);
-
-  if (flexible.length === 0) {
-    return resizeBaysPreservingLocks(sorted, totalWidth);
-  }
-
-  const base = Math.floor(budget / flexible.length);
-  const remainder = budget - base * flexible.length;
-  let flexIndex = 0;
-  return sorted.map((bay, index) => {
-    if (bay.lockedWidth) {
-      return {
-        ...bay,
-        index,
-        width: DRAWER_BAY_WIDTH_MM,
-        lockedWidth: DRAWER_BAY_WIDTH_MM,
-      };
-    }
-    const width = base + (flexIndex === flexible.length - 1 ? remainder : 0);
-    flexIndex += 1;
-    return { ...bay, index, width };
-  });
 }
 
 /**
