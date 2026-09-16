@@ -1,12 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DRAWER_BAY_WIDTH_MM } from "@/lib/constants";
-import { exportQuotePdf } from "@/lib/exportQuote";
+import { flushSync } from "react-dom";
+import { doorBreakdownLines } from "@/lib/wardrobeDoors";
+import { UnitTabMenu } from "@/components/UnitTabMenu";
+import { ToolbarMenu, ToolbarMenuItem, ToolbarMenuSep } from "@/components/ToolbarMenu";
+import {
+  resolveUnitDepths,
+  unitQuoteCopy,
+} from "@/lib/mediaLayout";
 import {
   canAddDrawer,
   canAddRail,
   canAddShelf,
+  neighborBayHasShelves,
 } from "@/lib/placement";
 import {
   MAX_DRAWER_COUNT,
@@ -15,73 +22,92 @@ import {
   useWardrobeStore,
 } from "@/store/store";
 
-const MODULE_OPTIONS: {
-  type: ModuleType;
-  label: string;
-  short: string;
-  accent: string;
-}[] = [
-  { type: "shelf", label: "Shelf", short: "Shelf", accent: "#3f6f64" },
-  {
-    type: "drawer-pack",
-    label: "Drawer Unit",
-    short: "Drawer",
-    accent: "#8d6b45",
-  },
-  {
-    type: "hanging-rail",
-    label: "Hanging Rail",
-    short: "Rail",
-    accent: "#5b6472",
-  },
-];
-
-export function TopBar() {
+export function TopBar({
+  onAddTvUnit,
+  onOpenWardrobePanel,
+  onOpenInfoPanel,
+}: {
+  onAddTvUnit?: () => void;
+  onOpenWardrobePanel?: () => void;
+  onOpenInfoPanel?: () => void;
+}) {
   const wardrobe = useWardrobeStore((state) => state.wardrobe);
   const bays = useWardrobeStore((state) => state.bays);
   const modules = useWardrobeStore((state) => state.modules);
   const selectedBayId = useWardrobeStore((state) => state.selectedBayId);
   const materials = useWardrobeStore((state) => state.materials);
-  const bayCountInput = useWardrobeStore((state) => state.bayCountInput);
-  const defaultDrawerCount = useWardrobeStore(
-    (state) => state.defaultDrawerCount,
-  );
+  const unitMode = useWardrobeStore((state) => state.unitMode);
+  const kickerEnabled = useWardrobeStore((state) => state.kickerEnabled);
+  const kickerHeight = useWardrobeStore((state) => state.kickerHeight);
+  const tvNiche = useWardrobeStore((state) => state.tvNiche);
+  const isMedia = unitMode === "media";
+  const kickerMm = isMedia && kickerEnabled ? kickerHeight : 0;
+  const displayHeight = wardrobe.height + kickerMm;
 
   const setWardrobeWidth = useWardrobeStore((state) => state.setWardrobeWidth);
   const setWardrobeHeight = useWardrobeStore((state) => state.setWardrobeHeight);
-  const setBayCountInput = useWardrobeStore((state) => state.setBayCountInput);
+  const setWardrobeDepth = useWardrobeStore((state) => state.setWardrobeDepth);
+  const setWardrobeDepthTotal = useWardrobeStore(
+    (state) => state.setWardrobeDepthTotal,
+  );
   const setDefaultDrawerCount = useWardrobeStore(
     (state) => state.setDefaultDrawerCount,
   );
-  const divideIntoBays = useWardrobeStore((state) => state.divideIntoBays);
-  const applyStandardLayout = useWardrobeStore(
-    (state) => state.applyStandardLayout,
+  const setUnitMode = useWardrobeStore((state) => state.setUnitMode);
+  const setKickerEnabled = useWardrobeStore((state) => state.setKickerEnabled);
+  const placeTvNicheOnSelection = useWardrobeStore(
+    (state) => state.placeTvNicheOnSelection,
   );
-  const selectBay = useWardrobeStore((state) => state.selectBay);
   const addModule = useWardrobeStore((state) => state.addModule);
-  const setSlidingDoors = useWardrobeStore((state) => state.setSlidingDoors);
-  const setMirrorSide = useWardrobeStore((state) => state.setMirrorSide);
-  const setBayWidth = useWardrobeStore((state) => state.setBayWidth);
+  const evenSpaceShelves = useWardrobeStore((state) => state.evenSpaceShelves);
+  const clearBay = useWardrobeStore((state) => state.clearBay);
+  const alignTvShelvesWithOuterBays = useWardrobeStore(
+    (state) => state.alignTvShelvesWithOuterBays,
+  );
+  const unitCaption = useWardrobeStore((state) => state.unitCaption);
+  const extraNotes = useWardrobeStore((state) => state.extraNotes);
+  const clientName = useWardrobeStore((state) => state.clientName);
+  const setClientNameRequired = useWardrobeStore(
+    (state) => state.setClientNameRequired,
+  );
+  const setDoorSystemRequired = useWardrobeStore(
+    (state) => state.setDoorSystemRequired,
+  );
+  const doorSystemRequired = useWardrobeStore(
+    (state) => state.doorSystemRequired,
+  );
+  const doorSystemPromptKey = useWardrobeStore(
+    (state) => state.doorSystemPromptKey,
+  );
 
+  const depths = resolveUnitDepths(wardrobe, unitMode);
   const [widthDraft, setWidthDraft] = useState(String(wardrobe.width));
-  const [heightDraft, setHeightDraft] = useState(String(wardrobe.height));
-  const [bayWidthDraft, setBayWidthDraft] = useState("");
+  const [heightDraft, setHeightDraft] = useState(String(displayHeight));
+  const [depthDraft, setDepthDraft] = useState(String(depths.depth));
+  const [depthTotalDraft, setDepthTotalDraft] = useState(
+    String(depths.depthTotal),
+  );
   const [exporting, setExporting] = useState(false);
 
   const selectedBay = bays.find((bay) => bay.id === selectedBayId) ?? null;
-  const bayLocked = Boolean(selectedBay?.lockedWidth);
+  const selectedBayShelves = selectedBay
+    ? modules.filter(
+        (mod) => mod.bayId === selectedBay.id && mod.type === "shelf",
+      ).length
+    : 0;
 
   useEffect(() => {
     setWidthDraft(String(wardrobe.width));
   }, [wardrobe.width]);
 
   useEffect(() => {
-    setHeightDraft(String(wardrobe.height));
-  }, [wardrobe.height]);
+    setHeightDraft(String(displayHeight));
+  }, [displayHeight]);
 
   useEffect(() => {
-    setBayWidthDraft(selectedBay ? String(selectedBay.width) : "");
-  }, [selectedBay]);
+    setDepthDraft(String(depths.depth));
+    setDepthTotalDraft(String(depths.depthTotal));
+  }, [depths.depth, depths.depthTotal]);
 
   const commitWidth = () => {
     const parsed = Number(widthDraft);
@@ -94,46 +120,156 @@ export function TopBar() {
 
   const commitHeight = () => {
     const parsed = Number(heightDraft);
-    if (!Number.isFinite(parsed)) {
-      setHeightDraft(String(wardrobe.height));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setHeightDraft(String(displayHeight));
+      return;
+    }
+    if (isMedia && kickerMm > 0) {
+      setWardrobeHeight(Math.max(600, Math.round(parsed) - kickerMm));
       return;
     }
     setWardrobeHeight(parsed);
   };
 
-  const commitBayWidth = () => {
-    if (!selectedBay || bayLocked) return;
-    const parsed = Number(bayWidthDraft);
-    if (!Number.isFinite(parsed)) {
-      setBayWidthDraft(String(selectedBay.width));
+  const commitDepth = () => {
+    const parsed = Number(depthDraft);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setDepthDraft(String(depths.depth));
       return;
     }
-    setBayWidth(selectedBay.id, parsed);
+    setWardrobeDepth(parsed);
   };
 
-  const nudgeBayWidth = (delta: number) => {
-    if (!selectedBay || bayLocked) return;
-    setBayWidth(selectedBay.id, selectedBay.width + delta);
+  const commitDepthTotal = () => {
+    const parsed = Number(depthTotalDraft);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setDepthTotalDraft(String(depths.depthTotal));
+      return;
+    }
+    setWardrobeDepthTotal(parsed);
+  };
+
+  const commitSizeMenu = () => {
+    commitWidth();
+    commitHeight();
+    commitDepth();
+    if (!isMedia) commitDepthTotal();
   };
 
   const handleCreatePdf = async () => {
+    if (!clientName.trim()) {
+      setClientNameRequired(true);
+      onOpenInfoPanel?.();
+      return;
+    }
+
+    const store = useWardrobeStore.getState();
+    const designs = store.commitAndGetDesigns();
+    const originId = store.activeDesignId;
+    const missingDoors = designs.find(
+      (item) =>
+        item.unitMode === "wardrobe" && item.materials.doorSystem === "none",
+    );
+    if (missingDoors) {
+      if (missingDoors.id !== originId) {
+        store.switchDesign(missingDoors.id);
+      }
+      setDoorSystemRequired(true);
+      onOpenWardrobePanel?.();
+      return;
+    }
+
     const canvasElement = document.getElementById("wardrobe-canvas-capture");
-    const bomElement = document.getElementById("bill-of-materials");
     if (!canvasElement || exporting) return;
 
     setExporting(true);
+    const hadHighlight = store.canvasHighlight;
     try {
+      const { captureUnitJpeg, exportQuotePdf } = await import(
+        "@/lib/exportQuote"
+      );
+      const waitPaint = async () => {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+        await new Promise((resolve) => window.setTimeout(resolve, 40));
+      };
+
+      const units = [];
+      for (const design of designs) {
+        flushSync(() => {
+          const live = useWardrobeStore.getState();
+          if (live.activeDesignId !== design.id) {
+            live.switchDesign(design.id);
+          }
+          useWardrobeStore.getState().clearCanvasHighlight();
+          useWardrobeStore.getState().setPdfExporting(true);
+        });
+        await waitPaint();
+
+        const live = useWardrobeStore.getState();
+        const quote = unitQuoteCopy(live.wardrobe, live.unitMode);
+        units.push({
+          imageData: await captureUnitJpeg(canvasElement),
+          unitCaption: live.unitCaption,
+          dimensions: quote.dimensions,
+          measurements: quote.measurements,
+          doorNotes:
+            live.unitMode === "wardrobe"
+              ? doorBreakdownLines(live.wardrobe.width, live.materials)
+              : [],
+          unitMode: live.unitMode,
+        });
+      }
+
+      const clientSlug = clientName
+        .trim()
+        .replace(/\s+/g, "-")
+        .toLowerCase();
       await exportQuotePdf({
-        canvasElement,
-        bomElement,
-        fileName: `fenix-wardrobe-${wardrobe.width}x${wardrobe.height}.pdf`,
+        units,
+        clientName: clientName.trim(),
+        extraNotes,
+        fileName: `fenix-${clientSlug}.pdf`,
       });
     } finally {
+      flushSync(() => {
+        const live = useWardrobeStore.getState();
+        if (live.activeDesignId !== originId) {
+          live.switchDesign(originId);
+        }
+        useWardrobeStore.setState({
+          pdfExporting: false,
+          canvasHighlight: hadHighlight,
+        });
+      });
       setExporting(false);
     }
   };
 
-  const sortedBays = [...bays].sort((a, b) => a.index - b.index);
+  const handleAddTv = () => {
+    placeTvNicheOnSelection();
+    onAddTvUnit?.();
+  };
+
+  const handleEven = () => {
+    if (!selectedBay) return;
+    evenSpaceShelves(selectedBay.id, {
+      target: "bay",
+      remainder: "bottom",
+    });
+  };
+
+  const handleAlign = () => {
+    if (!selectedBay) return;
+    evenSpaceShelves(selectedBay.id, { target: "sides" });
+  };
+
+  const canAlignShelves =
+    Boolean(selectedBay) &&
+    selectedBayShelves >= 1 &&
+    neighborBayHasShelves(modules, bays, selectedBay!.id);
+
   const canAdd = Boolean(selectedBayId) || bays.length > 0;
   const activeBayId = selectedBayId ?? bays[0]?.id ?? null;
   const activeBayModules = activeBayId
@@ -146,10 +282,16 @@ export function TopBar() {
       return canAddShelf(
         activeBayModules,
         wardrobe.height,
-        wardrobe.carcassHeight,
+        isMedia ? wardrobe.height : wardrobe.carcassHeight,
+        isMedia ? { zoneTop: 0 } : undefined,
       );
     }
-    if (type === "drawer-pack") return canAddDrawer(activeBayModules);
+    if (isMedia) return false;
+    if (type === "drawer-pack") {
+      return bays.some((bay) =>
+        canAddDrawer(modules.filter((mod) => mod.bayId === bay.id)),
+      );
+    }
     return canAddRail(
       activeBayModules,
       wardrobe.height,
@@ -157,255 +299,484 @@ export function TopBar() {
     );
   };
 
-  const moduleTitle = (type: ModuleType, label: string): string => {
-    if (!canAdd) return label;
-    if (type === "shelf" && !moduleEnabled(type)) {
-      return "No shelves in a double-hang bay";
-    }
-    if (type === "drawer-pack" && !moduleEnabled(type)) {
-      return "No drawers in a double-hang bay";
-    }
-    if (type === "hanging-rail" && !moduleEnabled(type)) {
-      return "Max 2 rails per bay";
-    }
-    return label;
-  };
-
   return (
-    <header className="toolbar-shell relative z-20 w-full border-b border-[var(--line)] bg-white/95 backdrop-blur-xl">
-      <div className="toolbar-row">
-        <div className="toolbar-brand shrink-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
-            Fenix
-          </p>
-          <p className="brand-title font-[family-name:var(--font-display)] font-semibold tracking-tight text-[var(--ink)]">
-            Wardrobe
-          </p>
-        </div>
+    <header className="toolbar-shell toolbar-shell-one relative z-50 w-full border-b border-[var(--line)] bg-white">
+      <div className="toolbar-row toolbar-row-one desktop-only">
+        <div className="toolbar-cluster shrink-0">
+          <div className="toolbar-brand">
+            <p className="brand-title font-[family-name:var(--font-display)] font-semibold tracking-tight text-[var(--ink)]">
+              FENIX
+            </p>
+          </div>
 
-        <div className="toolbar-section">
-          <span className="toolbar-label">Size</span>
-          <label className="toolbar-field">
-            <span>W</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              aria-label="Width mm"
-              value={widthDraft}
-              onChange={(event) =>
-                setWidthDraft(event.target.value.replace(/[^\d]/g, ""))
-              }
-              onBlur={commitWidth}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
-              }}
-              className="toolbar-input w-[5rem]"
+          <div className="mode-seg" role="group" aria-label="Unit type">
+            <button
+              type="button"
+              className="mode-seg-btn"
+              data-active={!isMedia}
+              aria-pressed={!isMedia}
+              onClick={() => setUnitMode("wardrobe")}
+            >
+              Wardrobe
+            </button>
+            <button
+              type="button"
+              className="mode-seg-btn"
+              data-active={isMedia}
+              aria-pressed={isMedia}
+              onClick={() => setUnitMode("media")}
+            >
+              TV / Bookshelf
+            </button>
+          </div>
+
+          <UnitTabMenu />
+
+          <ToolbarMenu
+            label="Size"
+            triggerClassName="toolbar-menu-trigger touch-btn"
+            panelClassName="toolbar-menu-size"
+            title="Unit measurements"
+            panelRole="dialog"
+            onClose={commitSizeMenu}
+          >
+            <SizeMeasureFields
+              widthDraft={widthDraft}
+              setWidthDraft={setWidthDraft}
+              commitWidth={commitWidth}
+              heightDraft={heightDraft}
+              setHeightDraft={setHeightDraft}
+              commitHeight={commitHeight}
+              isMedia={isMedia}
+              depthDraft={depthDraft}
+              setDepthDraft={setDepthDraft}
+              commitDepth={commitDepth}
+              depthTotalDraft={depthTotalDraft}
+              setDepthTotalDraft={setDepthTotalDraft}
+              commitDepthTotal={commitDepthTotal}
             />
-          </label>
-          <label className="toolbar-field">
-            <span>H</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              aria-label="Height mm"
-              value={heightDraft}
-              onChange={(event) =>
-                setHeightDraft(event.target.value.replace(/[^\d]/g, ""))
+          </ToolbarMenu>
+        </div>
+
+        <div className="toolbar-cluster toolbar-cluster-grow justify-end">
+          <div className="toolbar-btn-group" role="group" aria-label="Add fittings">
+            <button
+              type="button"
+              className="touch-btn touch-btn-add"
+              disabled={!moduleEnabled("shelf")}
+              onClick={() => addModule("shelf")}
+            >
+              + Shelf
+            </button>
+
+            {!isMedia && (
+              <>
+                <ToolbarMenu
+                  label="+ Drawer"
+                  align="right"
+                  disabled={!moduleEnabled("drawer-pack")}
+                  triggerClassName="toolbar-menu-trigger touch-btn-drawer"
+                >
+                  {Array.from(
+                    { length: MAX_DRAWER_COUNT - MIN_DRAWER_COUNT + 1 },
+                    (_, index) => MIN_DRAWER_COUNT + index,
+                  ).map((count) => (
+                    <ToolbarMenuItem
+                      key={count}
+                      disabled={!moduleEnabled("drawer-pack")}
+                      onClick={() => {
+                        setDefaultDrawerCount(count);
+                        addModule("drawer-pack");
+                      }}
+                    >
+                      {count} drawer{count === 1 ? "" : "s"}
+                    </ToolbarMenuItem>
+                  ))}
+                </ToolbarMenu>
+                <button
+                  type="button"
+                  className="touch-btn touch-btn-rail"
+                  disabled={!moduleEnabled("hanging-rail")}
+                  onClick={() => addModule("hanging-rail")}
+                >
+                  + Rail
+                </button>
+              </>
+            )}
+          </div>
+
+          {!isMedia && (
+            <div className="toolbar-btn-group" role="group" aria-label="Doors">
+              <button
+                key={`doors-desktop-${doorSystemPromptKey}`}
+                type="button"
+                className="touch-btn touch-btn-doors"
+                data-active={materials.doorSystem !== "none"}
+                data-attention={doorSystemRequired}
+                onClick={() => onOpenWardrobePanel?.()}
+                title="Doors, mirrors & materials"
+              >
+                {materials.doorSystem === "none"
+                  ? "Doors"
+                  : materials.doorsVisible
+                    ? materials.doorSystem === "sliding"
+                      ? "Sliding"
+                      : "Hinged"
+                    : "Doors hidden"}
+              </button>
+            </div>
+          )}
+
+          {isMedia && (
+            <div className="toolbar-btn-group" role="group" aria-label="TV unit">
+              {!tvNiche && (
+                <button
+                  type="button"
+                  className="touch-btn touch-btn-primary"
+                  onClick={handleAddTv}
+                >
+                  Add TV
+                </button>
+              )}
+              {tvNiche && (
+                <button
+                  type="button"
+                  className="touch-btn touch-btn-primary"
+                  onClick={() => alignTvShelvesWithOuterBays()}
+                  title="Align TV-column shelves with outer bay shelves"
+                >
+                  Align TV
+                </button>
+              )}
+              <button
+                type="button"
+                className="touch-btn"
+                onClick={() => setKickerEnabled(!kickerEnabled)}
+              >
+                {kickerEnabled ? `Kicker ${kickerHeight}` : "Kicker"}
+              </button>
+            </div>
+          )}
+
+          {selectedBay && (
+            <div className="toolbar-btn-group" role="group" aria-label="Bay">
+              <button
+                type="button"
+                className="touch-btn touch-btn-even"
+                disabled={selectedBayShelves < 1}
+                onClick={handleEven}
+                title="Even shelves in this bay"
+              >
+                Even
+              </button>
+              <button
+                type="button"
+                className="touch-btn touch-btn-align"
+                disabled={!canAlignShelves}
+                onClick={handleAlign}
+                title="Line shelves up with the neighbouring bay"
+              >
+                Align
+              </button>
+              <button
+                type="button"
+                className="touch-btn"
+                onClick={() => clearBay(selectedBay.id)}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
+          <div className="toolbar-btn-group" role="group" aria-label="Export">
+            <button
+              type="button"
+              className="touch-btn touch-btn-pdf"
+              disabled={exporting}
+              title={
+                !clientName.trim()
+                  ? "Enter client name before saving PDF"
+                  : !isMedia && materials.doorSystem === "none"
+                    ? "Select a door system before saving PDF"
+                    : "Save PDF"
               }
-              onBlur={commitHeight}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
+              onClick={() => {
+                void handleCreatePdf();
               }}
-              className="toolbar-input w-[5rem]"
-            />
-          </label>
+            >
+              {exporting ? "…" : "PDF"}
+            </button>
+          </div>
         </div>
+      </div>
 
-        <div className="toolbar-section">
-          <span className="toolbar-label">Bays</span>
-          <select
-            aria-label="Bay count"
-            value={bayCountInput}
-            onChange={(event) => setBayCountInput(Number(event.target.value))}
-            className="toolbar-select"
+      <div className="toolbar-row toolbar-row-compact compact-only">
+        <p className="brand-title compact-brand font-[family-name:var(--font-display)] font-semibold tracking-tight text-[var(--ink)]">
+          FENIX
+        </p>
+        <ToolbarMenu
+          label="Size"
+          triggerClassName="toolbar-menu-trigger touch-btn"
+          panelClassName="toolbar-menu-size"
+          title="Size and unit"
+          panelRole="dialog"
+          onClose={commitSizeMenu}
+        >
+          <div className="toolbar-menu-field">
+            <span>Type</span>
+            <div className="mode-seg compact-mode-seg" role="group" aria-label="Unit type">
+              <button
+                type="button"
+                className="mode-seg-btn"
+                data-active={!isMedia}
+                data-close-menu
+                onClick={() => setUnitMode("wardrobe")}
+              >
+                Wardrobe
+              </button>
+              <button
+                type="button"
+                className="mode-seg-btn"
+                data-active={isMedia}
+                data-close-menu
+                onClick={() => setUnitMode("media")}
+              >
+                TV
+              </button>
+            </div>
+          </div>
+          <div className="toolbar-menu-field compact-tab-field">
+            <span>Unit</span>
+            <UnitTabMenu />
+          </div>
+          <SizeMeasureFields
+            widthDraft={widthDraft}
+            setWidthDraft={setWidthDraft}
+            commitWidth={commitWidth}
+            heightDraft={heightDraft}
+            setHeightDraft={setHeightDraft}
+            commitHeight={commitHeight}
+            isMedia={isMedia}
+            depthDraft={depthDraft}
+            setDepthDraft={setDepthDraft}
+            commitDepth={commitDepth}
+            depthTotalDraft={depthTotalDraft}
+            setDepthTotalDraft={setDepthTotalDraft}
+            commitDepthTotal={commitDepthTotal}
+          />
+          {isMedia && (
+            <>
+              <ToolbarMenuSep />
+              <ToolbarMenuItem
+                onClick={() => setKickerEnabled(!kickerEnabled)}
+              >
+                {kickerEnabled ? `Kicker ${kickerHeight} on` : "Kicker off"}
+              </ToolbarMenuItem>
+            </>
+          )}
+        </ToolbarMenu>
+        <ToolbarMenu
+          label="Add"
+          triggerClassName="toolbar-menu-trigger touch-btn-add"
+          title="Add fittings"
+        >
+          <ToolbarMenuItem
+            disabled={!moduleEnabled("shelf")}
+            onClick={() => addModule("shelf")}
           >
-            {Array.from({ length: 8 }, (_, index) => index + 1).map((count) => (
-              <option key={count} value={count}>
-                {count}
-              </option>
-            ))}
-          </select>
+            Shelf
+          </ToolbarMenuItem>
+          {!isMedia && (
+            <>
+              {Array.from(
+                { length: MAX_DRAWER_COUNT - MIN_DRAWER_COUNT + 1 },
+                (_, index) => MIN_DRAWER_COUNT + index,
+              ).map((count) => (
+                <ToolbarMenuItem
+                  key={count}
+                  disabled={!moduleEnabled("drawer-pack")}
+                  onClick={() => {
+                    setDefaultDrawerCount(count);
+                    addModule("drawer-pack");
+                  }}
+                >
+                  {count} drawers
+                </ToolbarMenuItem>
+              ))}
+              <ToolbarMenuItem
+                disabled={!moduleEnabled("hanging-rail")}
+                onClick={() => addModule("hanging-rail")}
+              >
+                Rail
+              </ToolbarMenuItem>
+            </>
+          )}
+          {isMedia && !tvNiche && (
+            <ToolbarMenuItem onClick={handleAddTv}>TV unit</ToolbarMenuItem>
+          )}
+        </ToolbarMenu>
+        <button
+          type="button"
+          className="touch-btn"
+          onClick={() => onOpenInfoPanel?.()}
+        >
+          Notes
+        </button>
+        {!isMedia && (
           <button
+            key={`doors-compact-${doorSystemPromptKey}`}
             type="button"
-            onClick={() => divideIntoBays(bayCountInput)}
-            className="touch-btn"
+            className="touch-btn touch-btn-doors"
+            data-active={materials.doorSystem !== "none"}
+            data-attention={doorSystemRequired}
+            onClick={() => onOpenWardrobePanel?.()}
           >
-            Apply
+            Doors
           </button>
-          <button
-            type="button"
-            onClick={() => applyStandardLayout()}
-            className="touch-btn"
-            title="Reset to standard layout"
-          >
-            Reset
-          </button>
-        </div>
-
-        <div className="toolbar-section">
-          <button
-            type="button"
-            className="touch-chip"
-            data-active={materials.slidingDoors}
-            onClick={() => setSlidingDoors(!materials.slidingDoors)}
-            title="Sliding doors"
-          >
-            Sliding
-          </button>
-          <button
-            type="button"
-            className="touch-chip"
-            data-active={materials.mirrorSide === "left"}
-            onClick={() =>
-              setMirrorSide(
-                materials.mirrorSide === "left" ? "none" : "left",
-              )
-            }
-            title="Mirror on left door"
-          >
-            Mir L
-          </button>
-          <button
-            type="button"
-            className="touch-chip"
-            data-active={materials.mirrorSide === "right"}
-            onClick={() =>
-              setMirrorSide(
-                materials.mirrorSide === "right" ? "none" : "right",
-              )
-            }
-            title="Mirror on right door"
-          >
-            Mir R
-          </button>
+        )}
+        {isMedia && tvNiche && (
           <button
             type="button"
             className="touch-btn touch-btn-primary"
-            disabled={exporting}
-            onClick={() => {
-              void handleCreatePdf();
-            }}
+            onClick={() => onAddTvUnit?.()}
           >
-            {exporting ? "…" : "PDF"}
+            TV
           </button>
-        </div>
-      </div>
-
-      <div className="toolbar-row toolbar-row-secondary">
-        <div className="toolbar-section min-w-0">
-          <div className="bay-strip">
-            {sortedBays.map((bay) => (
-              <button
-                key={bay.id}
-                type="button"
-                onClick={() => selectBay(bay.id)}
-                className="touch-chip bay-chip"
-                data-active={bay.id === selectedBayId}
-                title={`Bay ${bay.index + 1} — ${bay.width} mm`}
-              >
-                B{bay.index + 1}·{bay.width}
-                {bay.lockedWidth ? "D" : ""}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {selectedBay && (
-          <div className="toolbar-section">
-            <button
-              type="button"
-              disabled={bayLocked}
-              onClick={() => nudgeBayWidth(-50)}
-              className="touch-btn disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              −50
-            </button>
-            <input
-              type="text"
-              inputMode="numeric"
-              aria-label="Selected bay width mm"
-              value={bayWidthDraft}
-              disabled={bayLocked}
-              onChange={(event) =>
-                setBayWidthDraft(event.target.value.replace(/[^\d]/g, ""))
-              }
-              onBlur={commitBayWidth}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
-              }}
-              className="toolbar-input w-[5.5rem] disabled:opacity-60"
-            />
-            <button
-              type="button"
-              disabled={bayLocked}
-              onClick={() => nudgeBayWidth(50)}
-              className="touch-btn disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              +50
-            </button>
-            {bayLocked && (
-              <span className="text-xs text-[var(--muted)]">
-                {DRAWER_BAY_WIDTH_MM}
-              </span>
-            )}
-          </div>
         )}
-
-        <div className="toolbar-section">
-          <select
-            aria-label="Drawer count"
-            value={
-              modules.find(
-                (mod) =>
-                  mod.bayId === selectedBayId && mod.type === "drawer-pack",
-              )?.drawerCount ?? defaultDrawerCount
-            }
-            onChange={(event) =>
-              setDefaultDrawerCount(Number(event.target.value))
-            }
-            className="toolbar-select"
-            title="Drawer count for selected bay (or new units)"
-          >
-            {Array.from(
-              { length: MAX_DRAWER_COUNT - MIN_DRAWER_COUNT + 1 },
-              (_, index) => MIN_DRAWER_COUNT + index,
-            ).map((count) => (
-              <option key={count} value={count}>
-                {count} dr
-              </option>
-            ))}
-          </select>
-          {MODULE_OPTIONS.map((option) => (
-            <button
-              key={option.type}
-              type="button"
-              onClick={() => addModule(option.type)}
-              disabled={!moduleEnabled(option.type)}
-              className="touch-btn touch-btn-add disabled:cursor-not-allowed disabled:opacity-40"
-              style={{ borderColor: `${option.accent}55` }}
-              title={moduleTitle(option.type, option.label)}
-            >
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ background: option.accent }}
-              />
-              {option.type === "drawer-pack"
-                ? `${defaultDrawerCount} Dr`
-                : option.short}
-            </button>
-          ))}
-        </div>
+        <button
+          type="button"
+          className="touch-btn touch-btn-pdf"
+          disabled={exporting}
+          title={
+            !clientName.trim()
+              ? "Enter client name before saving PDF"
+              : !isMedia && materials.doorSystem === "none"
+                ? "Select a door system before saving PDF"
+                : "Save PDF"
+          }
+          onClick={() => {
+            void handleCreatePdf();
+          }}
+        >
+          {exporting ? "…" : "PDF"}
+        </button>
       </div>
     </header>
+  );
+}
+
+function SizeMeasureFields({
+  widthDraft,
+  setWidthDraft,
+  commitWidth,
+  heightDraft,
+  setHeightDraft,
+  commitHeight,
+  isMedia,
+  depthDraft,
+  setDepthDraft,
+  commitDepth,
+  depthTotalDraft,
+  setDepthTotalDraft,
+  commitDepthTotal,
+}: {
+  widthDraft: string;
+  setWidthDraft: (value: string) => void;
+  commitWidth: () => void;
+  heightDraft: string;
+  setHeightDraft: (value: string) => void;
+  commitHeight: () => void;
+  isMedia: boolean;
+  depthDraft: string;
+  setDepthDraft: (value: string) => void;
+  commitDepth: () => void;
+  depthTotalDraft: string;
+  setDepthTotalDraft: (value: string) => void;
+  commitDepthTotal: () => void;
+}) {
+  const digits = (value: string) => value.replace(/[^\d]/g, "");
+  return (
+    <>
+      <div className="toolbar-menu-field">
+        <span>Length mm</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          aria-label="Length along wall mm"
+          value={widthDraft}
+          suppressHydrationWarning
+          onChange={(event) => setWidthDraft(digits(event.target.value))}
+          onBlur={commitWidth}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          className="toolbar-input"
+        />
+      </div>
+      <div className="toolbar-menu-field">
+        <span>Width mm</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          aria-label={
+            isMedia ? "Width / overall height mm including kicker" : "Width mm"
+          }
+          value={heightDraft}
+          suppressHydrationWarning
+          onChange={(event) => setHeightDraft(digits(event.target.value))}
+          onBlur={commitHeight}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          className="toolbar-input"
+        />
+      </div>
+      <div className="toolbar-menu-field">
+        <span>Depth inside mm</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          aria-label="Depth inside mm"
+          value={depthDraft}
+          suppressHydrationWarning
+          onChange={(event) => setDepthDraft(digits(event.target.value))}
+          onBlur={commitDepth}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          className="toolbar-input"
+        />
+      </div>
+      {!isMedia && (
+        <div className="toolbar-menu-field">
+          <span>Depth total mm</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label="Depth total mm"
+            value={depthTotalDraft}
+            suppressHydrationWarning
+            onChange={(event) => setDepthTotalDraft(digits(event.target.value))}
+            onBlur={commitDepthTotal}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className="toolbar-input"
+          />
+        </div>
+      )}
+      <p className="toolbar-size-hint">
+        {isMedia
+          ? "TV unit base: 350 mm inside."
+          : "Wardrobe base: 450 mm inside, 600 mm overall."}
+      </p>
+      <button
+        type="button"
+        className="touch-btn touch-btn-primary w-full"
+        data-close-menu
+      >
+        Apply size
+      </button>
+    </>
   );
 }

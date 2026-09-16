@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DRAWER_BAY_WIDTH_MM } from "@/lib/constants";
 import {
   canAddDrawer,
   canAddRail,
@@ -255,8 +254,7 @@ export function Sidebar() {
             </label>
           </div>
           <p className="text-[11px] text-[var(--muted)]">
-            Type a size, then press Enter. Min width{" "}
-            {DRAWER_BAY_WIDTH_MM + 800} mm.
+            Type a size, then press Enter. Min width 1000 mm.
           </p>
         </section>
 
@@ -313,7 +311,6 @@ export function Sidebar() {
                 data-active={bay.id === selectedBayId}
               >
                 Bay {bay.index + 1}
-                {bay.lockedWidth ? " · D" : ""}
               </button>
             ))}
           </div>
@@ -331,7 +328,6 @@ export function Sidebar() {
               </button>
               <p className="min-w-0 flex-1 text-center text-[11px] text-[var(--muted)]">
                 Swap Bay {selectedBay.index + 1}
-                {selectedBay.lockedWidth ? " (fixed drawer)" : ""}
               </p>
               <button
                 type="button"
@@ -523,11 +519,16 @@ export function Sidebar() {
             </span>
             <input
               type="checkbox"
-              checked={materials.slidingDoors}
-              onChange={(event) => setSlidingDoors(event.target.checked)}
+              checked={materials.doorSystem === "sliding"}
+              onChange={(event) =>
+                setSlidingDoors(event.target.checked)
+              }
               className="h-3.5 w-3.5 accent-[var(--accent)]"
             />
           </label>
+          <p className="text-[0.65rem] text-[var(--muted)]">
+            Full door options (sliding / hinged / hide) are in the Doors panel.
+          </p>
         </section>
       </div>
     </aside>

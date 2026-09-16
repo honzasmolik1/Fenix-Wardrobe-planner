@@ -9,8 +9,8 @@
 - Add shelves, 3-drawer units, and hanging rails into a selected bay
 - Vertical drag with 32 mm snap increments
 - Live clearance/gap dimensions between modules, floor, and ceiling
-- Materials & hardware options with a live bill of materials
-- Download Quote PDF (canvas + BOM) via html2canvas + jsPDF
+- Materials & hardware options
+- Download drawing PDF (layout + extra notes) via html2canvas + jsPDF
 
 ## Getting started
 

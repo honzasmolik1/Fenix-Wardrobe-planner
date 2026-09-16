@@ -2,12 +2,17 @@ export const MODULE_HEIGHTS = {
   shelf: 18,
   "drawer-pack": 600,
   "hanging-rail": 48,
+  /** Fixed horizontal upright / cross board */
+  divider: 18,
 } as const;
 
 export const SNAP_INCREMENT_MM = 32;
 
 /** Manual drag snap — positions stick to clean 10 mm steps (340, 500, …) */
 export const DRAG_SNAP_MM = 10;
+
+/** Pull a dragged shelf onto a neighbor bay’s shelf line when this close (mm). */
+export const SHELF_ALIGN_MAGNET_MM = 28;
 
 /** Construction / top-bay line snaps in 50 mm steps (default 2000 mm). */
 export const CARCASS_SNAP_MM = 50;
@@ -56,9 +61,12 @@ export const CONSTRUCTION_SHELF_HEIGHT_MM = 18;
  */
 export const DRAWER_BAY_WIDTH_MM = 500;
 
+/** Smallest wardrobe overall width. */
+export const MIN_WARDROBE_WIDTH_MM = 1000;
+
 export const DRAWER_UNIT_HEIGHT_MM = 200;
 export const DEFAULT_DRAWER_COUNT = 3;
-export const MIN_DRAWER_COUNT = 1;
+export const MIN_DRAWER_COUNT = 3;
 export const MAX_DRAWER_COUNT = 6;
 
 export function drawerPackHeight(drawerCount: number): number {
@@ -68,14 +76,22 @@ export function drawerPackHeight(drawerCount: number): number {
 export function clampCarcassHeight(
   carcassHeight: number,
   wardrobeHeight: number,
+  options?: { minTopBoxMm?: number; snap?: boolean },
 ): number {
+  const minTop = Math.max(
+    0,
+    Math.round(options?.minTopBoxMm ?? MIN_TOP_BOX_MM),
+  );
   const maxCarcass = Math.max(
     MIN_CARCASS_HEIGHT_MM,
-    wardrobeHeight - MIN_TOP_BOX_MM,
+    wardrobeHeight - minTop,
   );
-  const snapped =
-    Math.round(carcassHeight / CARCASS_SNAP_MM) * CARCASS_SNAP_MM;
-  return Math.max(MIN_CARCASS_HEIGHT_MM, Math.min(maxCarcass, snapped));
+  const raw = Math.round(carcassHeight);
+  const value =
+    options?.snap === false
+      ? raw
+      : Math.round(raw / CARCASS_SNAP_MM) * CARCASS_SNAP_MM;
+  return Math.max(MIN_CARCASS_HEIGHT_MM, Math.min(maxCarcass, value));
 }
 
 /** Y of the construction shelf (from wardrobe top). */
