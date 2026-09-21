@@ -620,9 +620,23 @@ export function centeredTvStartBayIndex(
 }
 
 /**
+ * Column span the TV can use and still sit centred: it keeps a column on each
+ * side, so a 2-column TV in a 3-column unit narrows to 1 rather than ending up
+ * hard against one end. Under 3 columns the TV simply spans the whole unit.
+ */
+export function centeredTvSpan(totalBays: number, wantedSpan: number): number {
+  const total = Math.max(1, Math.round(totalBays));
+  const wanted = Math.max(1, Math.round(wantedSpan));
+  if (total < 3) return total;
+  return Math.max(1, Math.min(wanted, total - 2));
+}
+
+/**
  * Resize carcass columns so the TV span sums to `tvWidth`.
- * Every outer bay gets the same share of leftover width (keeps Bay 1
- * from ballooning when left/right outer counts differ).
+ *
+ * The leftover width is halved between the columns left of the TV and those
+ * right of it, so the opening sits dead centre in the unit even when the two
+ * sides hold different numbers of columns.
  */
 export function resizeBaysToTvWidth(
   bays: Bay[],
@@ -639,44 +653,53 @@ export function resizeBaysToTvWidth(
     niche.startBayIndex + niche.bayCount - 1,
   );
   const spanCount = end - start + 1;
-  const outerCount = sorted.length - spanCount;
+  const leftCount = start;
+  const rightCount = sorted.length - 1 - end;
+  const outerCount = leftCount + rightCount;
   const safeTotal = Math.max(600, Math.round(totalWidth));
 
   const minTv = Math.max(MIN_TV_WIDTH_MM, spanCount * MIN_OUTER_BAY_WIDTH_MM);
+  // With columns on both sides each half must cover the busier side, or the
+  // narrower side would be squeezed under the minimum column width.
+  const outerMinTotal =
+    leftCount > 0 && rightCount > 0
+      ? 2 * Math.max(leftCount, rightCount) * MIN_OUTER_BAY_WIDTH_MM
+      : outerCount * MIN_OUTER_BAY_WIDTH_MM;
   const maxTv =
     outerCount === 0
       ? safeTotal
-      : Math.max(
-          minTv,
-          safeTotal - outerCount * MIN_OUTER_BAY_WIDTH_MM,
-        );
+      : Math.max(minTv, safeTotal - outerMinTotal);
   const targetTv = Math.max(
     minTv,
     Math.min(maxTv, Math.round(tvWidth || niche.width || minTv)),
   );
   const outerBudget = Math.max(0, safeTotal - targetTv);
 
-  const spanWidths = splitEqualWidths(targetTv, spanCount);
-  const outerWidths =
-    outerCount > 0 ? splitEqualWidths(outerBudget, outerCount) : [];
+  let leftBudget = 0;
+  let rightBudget = 0;
+  if (leftCount > 0 && rightCount > 0) {
+    leftBudget = Math.floor(outerBudget / 2);
+    rightBudget = outerBudget - leftBudget;
+  } else if (leftCount > 0) {
+    leftBudget = outerBudget;
+  } else {
+    rightBudget = outerBudget;
+  }
 
-  let spanIndex = 0;
-  let outerIndex = 0;
+  const spanWidths = splitEqualWidths(targetTv, spanCount);
+  const leftWidths = splitEqualWidths(leftBudget, leftCount);
+  const rightWidths = splitEqualWidths(rightBudget, rightCount);
+
+  // Widths are taken straight from the split so the columns still add up to
+  // the unit width exactly — the budget maths above keeps them above minimum.
   return sorted.map((bay, index) => {
     if (index >= start && index <= end) {
-      const width = Math.max(
-        MIN_OUTER_BAY_WIDTH_MM,
-        spanWidths[spanIndex] ?? Math.floor(targetTv / spanCount),
-      );
-      spanIndex += 1;
-      return { ...bay, index, width };
+      return { ...bay, index, width: spanWidths[index - start] ?? 0 };
     }
-    const width = Math.max(
-      MIN_OUTER_BAY_WIDTH_MM,
-      outerWidths[outerIndex] ?? Math.floor(outerBudget / Math.max(1, outerCount)),
-    );
-    outerIndex += 1;
-    return { ...bay, index, width };
+    if (index < start) {
+      return { ...bay, index, width: leftWidths[index] ?? 0 };
+    }
+    return { ...bay, index, width: rightWidths[index - end - 1] ?? 0 };
   });
 }
 

@@ -41,6 +41,7 @@ import {
   DEFAULT_WARDROBE_DEPTH_TOTAL_MM,
   MIN_OUTER_BAY_WIDTH_MM,
   bayInTvNiche,
+  centeredTvSpan,
   centeredTvStartBayIndex,
   clampTvNiche,
   createMediaBays,
@@ -877,8 +878,22 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
     if (unitMode === "media") {
       const kickerMm = activeKickerMm(get());
       let nextBays = createMediaBays(wardrobe.width, safeCount);
+      // Adding or removing a column would otherwise leave the TV where it was
+      // and push it off to one side, so re-centre the span on the new count.
+      const nicheSpan = tvNiche
+        ? centeredTvSpan(safeCount, tvNiche.bayCount)
+        : 0;
       const niche = tvNiche
-        ? clampTvNiche(tvNiche, nextBays.length, wardrobe.height, kickerMm)
+        ? clampTvNiche(
+            {
+              ...tvNiche,
+              bayCount: nicheSpan,
+              startBayIndex: centeredTvStartBayIndex(safeCount, nicheSpan),
+            },
+            nextBays.length,
+            wardrobe.height,
+            kickerMm,
+          )
         : null;
       if (niche) {
         nextBays = resizeBaysToTvWidth(
