@@ -13,7 +13,6 @@ import {
   canAddDrawer,
   canAddRail,
   canAddShelf,
-  neighborBayHasShelves,
 } from "@/lib/placement";
 import {
   MAX_DRAWER_COUNT,
@@ -60,8 +59,6 @@ export function TopBar({
     (state) => state.placeTvNicheOnSelection,
   );
   const addModule = useWardrobeStore((state) => state.addModule);
-  const evenSpaceShelves = useWardrobeStore((state) => state.evenSpaceShelves);
-  const clearBay = useWardrobeStore((state) => state.clearBay);
   const alignTvShelvesWithOuterBays = useWardrobeStore(
     (state) => state.alignTvShelvesWithOuterBays,
   );
@@ -78,12 +75,6 @@ export function TopBar({
   const setDoorSystemRequired = useWardrobeStore(
     (state) => state.setDoorSystemRequired,
   );
-  const doorSystemRequired = useWardrobeStore(
-    (state) => state.doorSystemRequired,
-  );
-  const doorSystemPromptKey = useWardrobeStore(
-    (state) => state.doorSystemPromptKey,
-  );
 
   const depths = resolveUnitDepths(wardrobe, unitMode);
   const [widthDraft, setWidthDraft] = useState(String(wardrobe.width));
@@ -93,13 +84,6 @@ export function TopBar({
     String(depths.depthTotal),
   );
   const [exporting, setExporting] = useState(false);
-
-  const selectedBay = bays.find((bay) => bay.id === selectedBayId) ?? null;
-  const selectedBayShelves = selectedBay
-    ? modules.filter(
-        (mod) => mod.bayId === selectedBay.id && mod.type === "shelf",
-      ).length
-    : 0;
 
   useEffect(() => {
     setWidthDraft(String(wardrobe.width));
@@ -261,24 +245,6 @@ export function TopBar({
     onAddTvUnit?.();
   };
 
-  const handleEven = () => {
-    if (!selectedBay) return;
-    evenSpaceShelves(selectedBay.id, {
-      target: "bay",
-      remainder: "bottom",
-    });
-  };
-
-  const handleAlign = () => {
-    if (!selectedBay) return;
-    evenSpaceShelves(selectedBay.id, { target: "sides" });
-  };
-
-  const canAlignShelves =
-    Boolean(selectedBay) &&
-    selectedBayShelves >= 1 &&
-    neighborBayHasShelves(modules, bays, selectedBay!.id);
-
   const pdfBlockedReason = !clientName.trim()
     ? "Enter client name before saving PDF"
     : !isValidClientEmail(clientEmail)
@@ -422,28 +388,6 @@ export function TopBar({
             )}
           </div>
 
-          {!isMedia && (
-            <div className="toolbar-btn-group" role="group" aria-label="Doors">
-              <button
-                key={`doors-desktop-${doorSystemPromptKey}`}
-                type="button"
-                className="touch-btn touch-btn-doors"
-                data-active={materials.doorSystem !== "none"}
-                data-attention={doorSystemRequired}
-                onClick={() => onOpenWardrobePanel?.()}
-                title="Doors, mirrors & materials"
-              >
-                {materials.doorSystem === "none"
-                  ? "Doors"
-                  : materials.doorsVisible
-                    ? materials.doorSystem === "sliding"
-                      ? "Sliding"
-                      : "Hinged"
-                    : "Doors hidden"}
-              </button>
-            </div>
-          )}
-
           {isMedia && (
             <div className="toolbar-btn-group" role="group" aria-label="TV unit">
               {!tvNiche && (
@@ -471,36 +415,6 @@ export function TopBar({
                 onClick={() => setKickerEnabled(!kickerEnabled)}
               >
                 {kickerEnabled ? `Kicker ${kickerHeight}` : "Kicker"}
-              </button>
-            </div>
-          )}
-
-          {selectedBay && (
-            <div className="toolbar-btn-group" role="group" aria-label="Bay">
-              <button
-                type="button"
-                className="touch-btn touch-btn-even"
-                disabled={selectedBayShelves < 1}
-                onClick={handleEven}
-                title="Even shelves in this bay"
-              >
-                Even
-              </button>
-              <button
-                type="button"
-                className="touch-btn touch-btn-align"
-                disabled={!canAlignShelves}
-                onClick={handleAlign}
-                title="Line shelves up with the neighbouring bay"
-              >
-                Align
-              </button>
-              <button
-                type="button"
-                className="touch-btn"
-                onClick={() => clearBay(selectedBay.id)}
-              >
-                Clear
               </button>
             </div>
           )}
@@ -633,18 +547,6 @@ export function TopBar({
         >
           Notes
         </button>
-        {!isMedia && (
-          <button
-            key={`doors-compact-${doorSystemPromptKey}`}
-            type="button"
-            className="touch-btn touch-btn-doors"
-            data-active={materials.doorSystem !== "none"}
-            data-attention={doorSystemRequired}
-            onClick={() => onOpenWardrobePanel?.()}
-          >
-            Doors
-          </button>
-        )}
         {isMedia && tvNiche && (
           <button
             type="button"
