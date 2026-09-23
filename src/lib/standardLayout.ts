@@ -45,11 +45,22 @@ export function bayCountForWidth(
   );
 }
 
-/** Smallest bay count the user may step down to. */
-export function minBayCountForWidth(width: number): number {
+/**
+ * Smallest bay count the user may step down to.
+ *
+ * This is a hard floor, not the automatic count from `bayCountForWidth` — a
+ * wide wardrobe still opens with wider-spaced bays by default, but the user
+ * stays free to step down from there. The only real limits are the pinned
+ * 500 mm drawer bays plus one bay for whatever width is left over.
+ */
+export function minBayCountForWidth(
+  width: number,
+  drawerBayCount = 1,
+): number {
   const w = Math.max(MIN_WARDROBE_WIDTH_MM, Math.round(width));
-  if (w < WIDE_WARDROBE_FOUR_BAY_MM) return 2;
-  return bayCountForWidth(w);
+  const drawers = Math.max(0, Math.round(drawerBayCount) || 0);
+  const leftover = w - drawers * DRAWER_BAY_WIDTH_MM;
+  return Math.max(2, drawers + (leftover > 0 ? 1 : 0));
 }
 
 export function countDrawerBays(bays: Bay[], modules: Module[]): number {
@@ -115,24 +126,19 @@ export function createStandardBays(width: number): Bay[] {
 
 /**
  * How many flexible bays the leftover width needs.
+ *
  * Keeps the count the user already has unless that would squeeze a bay below
- * the minimum, or (on wide units) leave one over the shelf sag limit.
+ * the minimum width. The shelf sag limit shapes the *default* count in
+ * `bayCountForWidth`; it is deliberately not enforced here, so stepping the
+ * bay count down by hand is not undone.
  */
-function flexBayCountForBudget(
-  budget: number,
-  currentCount: number,
-  capToSagLimit: boolean,
-): number {
+function flexBayCountForBudget(budget: number, currentCount: number): number {
   if (budget <= 0) return 0;
   const mostByMinWidth = Math.max(
     1,
     Math.floor(budget / MIN_FLEXIBLE_BAY_WIDTH_MM),
   );
-  let count = Math.min(Math.max(1, currentCount), mostByMinWidth);
-  if (capToSagLimit) {
-    count = Math.max(count, Math.ceil(budget / MAX_BAY_WIDTH_MM));
-  }
-  return count;
+  return Math.min(Math.max(1, currentCount), mostByMinWidth);
 }
 
 /** Share a width across bays so the parts add back up to the whole exactly. */
@@ -195,12 +201,8 @@ export function normalizeBayWidths(
   const budget = width - lockedTotal;
   const flexBays = next.filter((bay) => !bay.lockedWidth);
   const wantedFlex = Math.min(
-    flexBayCountForBudget(
-      budget,
-      flexBays.length,
-      width >= WIDE_WARDROBE_FOUR_BAY_MM,
-    ),
-    // The sag limit must never cost us the ability to close the carcass
+    flexBayCountForBudget(budget, flexBays.length),
+    // Closing the carcass always wins over the overall bay-count cap
     Math.max(MAX_WARDROBE_BAY_COUNT - lockedCount, budget > 0 ? 1 : 0),
   );
 

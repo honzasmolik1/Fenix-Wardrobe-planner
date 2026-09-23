@@ -6,9 +6,12 @@ import {
   MAX_BAY_WIDTH_MM,
   MIN_FLEXIBLE_BAY_WIDTH_MM,
   adjustBayCountKeepingDrawerEnds,
+  bayCountForWidth,
+  countDrawerBays,
   createBaysWithCount,
   createStandardBays,
   createStandardModules,
+  minBayCountForWidth,
   normalizeBayWidths,
   resizeWardrobeBaysForWidth,
   setFlexibleBayWidth,
@@ -194,6 +197,47 @@ test("dragging one bay wider keeps the total unchanged", () => {
       );
     }
   }
+});
+
+test("the bay count can always be stepped down, not just up", () => {
+  for (const width of WIDTHS) {
+    const auto = bayCountForWidth(width, 1);
+    const floor = minBayCountForWidth(width, 1);
+    assert.ok(
+      floor < auto || auto <= 2,
+      `width ${width}: opens with ${auto} bays but cannot go below ${floor}`,
+    );
+  }
+});
+
+test("stepping the bay count down keeps the carcass full", () => {
+  for (const width of [2402, 2600, 3000, 3600, 4200, 4800]) {
+    let bays = createStandardBays(width);
+    let modules = createStandardModules(bays, 2400, 2000);
+    const floor = minBayCountForWidth(width, countDrawerBays(bays, modules));
+
+    for (let count = bays.length - 1; count >= floor; count -= 1) {
+      const out = adjustBayCountKeepingDrawerEnds(bays, modules, width, count);
+      bays = out.bays;
+      modules = out.modules;
+      assertFillsWidth(bays, width, `width ${width} stepped to ${count}`);
+      assertDrawerBaysLocked(bays, modules, `width ${width} stepped to ${count}`);
+      assert.equal(
+        bays.length,
+        count,
+        `width ${width}: asked for ${count} bays, got ${bays.length}`,
+      );
+    }
+  }
+});
+
+test("drawer bays raise the smallest workable bay count", () => {
+  // Three 500 mm drawer bays plus the 900 mm left over needs four bays
+  assert.equal(minBayCountForWidth(2400, 3), 4);
+  // A pure 1500 mm drawer bank has nothing left over
+  assert.equal(minBayCountForWidth(1500, 3), 3);
+  // Never below two bays
+  assert.equal(minBayCountForWidth(4800, 0), 2);
 });
 
 test("bays built from a raw count always add up", () => {

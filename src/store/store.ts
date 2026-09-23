@@ -88,6 +88,7 @@ import {
 } from "@/lib/placement";
 import {
   adjustBayCountKeepingDrawerEnds,
+  countDrawerBays,
   createBaysWithCount,
   createStandardBays,
   createStandardModules,
@@ -871,7 +872,10 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
       unitMode === "media"
         ? Math.max(1, Math.floor(count))
         : Math.max(
-            minBayCountForWidth(wardrobe.width),
+            minBayCountForWidth(
+              wardrobe.width,
+              countDrawerBays(bays, modules),
+            ),
             Math.min(MAX_WARDROBE_BAY_COUNT, Math.floor(count)),
           );
 

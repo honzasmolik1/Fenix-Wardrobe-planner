@@ -10,6 +10,7 @@ import {
 import { bayInTvNiche } from "@/lib/mediaLayout";
 import { neighborBayHasShelves } from "@/lib/placement";
 import {
+  countDrawerBays,
   minBayCountForWidth,
   MAX_WARDROBE_BAY_COUNT,
 } from "@/lib/standardLayout";
@@ -89,7 +90,9 @@ export function SelectionDock() {
   const drawerTarget =
     selectedModule?.type === "drawer-pack" ? selectedModule : bayDrawer;
 
-  const minBays = isMedia ? 1 : minBayCountForWidth(wardrobeWidth);
+  const minBays = isMedia
+    ? 1
+    : minBayCountForWidth(wardrobeWidth, countDrawerBays(bays, modules));
   const maxBays = isMedia ? 10 : MAX_WARDROBE_BAY_COUNT;
 
   const applyBayCount = (count: number) => {
